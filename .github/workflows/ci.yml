@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  local-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile Python and validate manifests
+        run: |
+          python -m py_compile skills/metron/scripts/*.py
+          python -c 'import json; json.load(open("plugin.json")); json.load(open(".agents/plugins/marketplace.json"))'
+      - name: Isolated CLI smoke
+        run: |
+          state="$(mktemp -d)"
+          METRON_HOME="$state" python3 -B skills/metron/scripts/run.py --help
+          METRON_HOME="$state" python3 -B skills/metron/scripts/run.py init
+          METRON_HOME="$state" python3 -B skills/metron/scripts/run.py status
+          METRON_HOME="$state" python3 -B skills/metron/scripts/run.py dashboard --no-open
+          grep -q '<title>METRON ledger</title>' "$state/dashboard.html"
+          if grep -Eq 'METRON_(METRICS|SECTIONS|STATUS)' "$state/dashboard.html"; then exit 1; fi
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: foundry-rs/foundry-toolchain@v1
+      - run: forge fmt --check
+        working-directory: contracts
+      - run: forge build
+        working-directory: contracts
+      - run: forge test -vv
+        working-directory: contracts

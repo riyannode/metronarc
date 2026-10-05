@@ -1,0 +1,27 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "metron",
+  "version": "0.1.0",
+  "description": "A local economic control and accounting layer for AI agents.",
+  "license": "MIT",
+  "keywords": ["agents", "payments", "accounting", "usdc"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "METRON",
+        "shortDescription": "Economic control for AI agents",
+        "longDescription": "Set economic goals, apply deterministic spend policy, and keep a local evidence-backed ledger for agent payments.",
+        "developerName": "METRON contributors",
+        "category": "Finance",
+        "capabilities": ["Read", "Write"],
+        "composerIcon": "./assets/metron-mark.svg",
+        "logo": "./assets/metron-mark.svg",
+        "defaultPrompt": ["Use METRON to show local economic status."]
+      },
+      "review": {
+        "commerce": true,
+        "commerce_description": "METRON can make bounded Circle x402 USDC service payments only after a policy ALLOW decision and separately recorded human approval. It creates invoices after customer terms acceptance and separate human approval, then reconciles incoming payments. Status, service search, and estimate operations do not move funds. Testnet activity is not production settlement."
+      }
+    }
+  }
+}
