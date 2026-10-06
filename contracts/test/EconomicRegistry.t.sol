@@ -108,6 +108,18 @@ contract EconomicRegistryTest is Test {
         registry.recordRevenue(spendId, revenueHash, 1, 0);
     }
 
+    function testRejectsInvalidRevenueFields() public {
+        recordSpend(wallet, spendId);
+        vm.startPrank(wallet);
+        vm.expectRevert(EconomicRegistry.InvalidRevenueRecord.selector);
+        registry.recordRevenue(spendId, bytes32(0), 1, 0);
+        vm.expectRevert(EconomicRegistry.InvalidRevenueRecord.selector);
+        registry.recordRevenue(spendId, keccak256("revenue-1"), 0, 0);
+        vm.expectRevert(EconomicRegistry.InvalidRevenueRecord.selector);
+        registry.recordRevenue(spendId, keccak256("revenue-2"), 1, 2);
+        vm.stopPrank();
+    }
+
     function testRegistryHasNoPayableOrTokenTransferEntryPoint() public {
         vm.deal(address(this), 1);
         (bool accepted,) = address(registry).call{value: 1}("");

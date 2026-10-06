@@ -29,7 +29,6 @@ contract EconomicRegistry {
     error InvalidRevenueRecord();
 
     mapping(address => mapping(bytes32 => SpendRecord)) public spendRecords;
-    mapping(address => mapping(bytes32 => bool)) public spendRecorded;
     mapping(address => mapping(bytes32 => RevenueRecord)) public revenueRecords;
     mapping(bytes32 => bool) public usedRevenueEvidence;
 
@@ -62,12 +61,11 @@ contract EconomicRegistry {
             msg.sender == address(0) || spendId == bytes32(0) || goalHash == bytes32(0)
                 || spendIntentHash == bytes32(0) || paymentEvidenceHash == bytes32(0) || amount == 0
         ) revert InvalidSpendRecord();
-        if (spendRecorded[msg.sender][spendId]) {
+        if (spendRecords[msg.sender][spendId].operatingWallet != address(0)) {
             revert SpendAlreadyRecorded(msg.sender, spendId);
         }
 
         uint256 timestamp = block.timestamp;
-        spendRecorded[msg.sender][spendId] = true;
         spendRecords[msg.sender][spendId] = SpendRecord(
             msg.sender, goalHash, spendIntentHash, paymentEvidenceHash, amount, timestamp, false
         );
@@ -81,7 +79,7 @@ contract EconomicRegistry {
         uint256 earnedCapital
     ) external {
         SpendRecord storage spend = spendRecords[msg.sender][spendId];
-        if (!spendRecorded[msg.sender][spendId]) revert SpendNotFound(msg.sender, spendId);
+        if (spend.operatingWallet == address(0)) revert SpendNotFound(msg.sender, spendId);
         if (spend.revenueLinked) revert RevenueAlreadyLinked(msg.sender, spendId);
         if (revenueEvidenceHash == bytes32(0) || revenueAmount == 0 || earnedCapital > revenueAmount) {
             revert InvalidRevenueRecord();
