@@ -4,8 +4,10 @@ import argparse
 import hashlib
 import html
 import json
+import os
 import re
 import sqlite3
+import subprocess
 import webbrowser
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +19,11 @@ import store
 DASHBOARD_TEMPLATE = Path(__file__).resolve().parents[3]/"dashboard"/"index.html"
 ARC_TESTNET_TX_URL = "https://explorer.testnet.arc.io/tx/"
 EVM_TX_HASH = re.compile(r"0x[0-9a-fA-F]{64}\Z")
+DASHBOARD_REFRESH_OPERATIONS = frozenset({
+    "goal-create", "spend-propose", "spend-approve", "spend-execute", "payment-reconcile",
+    "deal-create", "deal-update", "deal-accept", "deal-approve", "deal-reject",
+    "invoice-create", "invoice-post",
+})
 
 
 def parser() -> argparse.ArgumentParser:
@@ -188,6 +195,41 @@ def build_dashboard(db) -> str:
         .replace("<!-- METRON_STATUS -->",payload))
 
 
+def refresh_existing_dashboard() -> None:
+    path=store.STATE_HOME/"dashboard.html"
+    if not path.is_file(): return
+    try:
+        with store.connect() as db:
+            snapshot=build_dashboard(db)
+        path.write_text(snapshot,encoding="utf-8")
+    except Exception:
+        # A snapshot refresh must not change the result of a committed business operation.
+        pass
+
+
+def open_dashboard(path: Path) -> bool:
+    if os.environ.get("WSL_INTEROP"):
+        try:
+            windows_path=subprocess.run(["wslpath","-w",str(path)],check=True,capture_output=True,text=True,timeout=10).stdout.strip()
+            file_url="file:"+windows_path.replace("\\","/")
+            powershell=(
+                "$uri=[Console]::In.ReadToEnd().Trim(); "
+                "$id=(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https\\UserChoice').ProgId; "
+                "$cmd=(Get-ItemProperty \"Registry::HKEY_CLASSES_ROOT\\$id\\shell\\open\\command\").'(default)'; "
+                "$exe=[regex]::Match($cmd,'^\\\"([^\\\"]+)\\\"').Groups[1].Value; "
+                "if (-not $exe) { throw 'Default browser command is unavailable' }; "
+                "Start-Process -FilePath $exe -ArgumentList @($uri)"
+            )
+            subprocess.run(
+                ["powershell.exe","-NoProfile","-Command",powershell],
+                input=file_url,check=True,capture_output=True,text=True,timeout=10,
+            )
+            return True
+        except (OSError,subprocess.SubprocessError):
+            pass
+    return bool(webbrowser.open(path.as_uri()))
+
+
 def execute(args: argparse.Namespace) -> object:
     operation=args.operation
     data=read_input(args.input)
@@ -331,14 +373,17 @@ def execute(args: argparse.Namespace) -> object:
         if operation=="dashboard":
             path=store.STATE_HOME/"dashboard.html"
             path.write_text(build_dashboard(db),encoding="utf-8")
-            opened=webbrowser.open(path.as_uri()) if not args.no_open else False
+            opened=open_dashboard(path) if not args.no_open else False
             return {"path":str(path),"opened":bool(opened)}
     raise finance.DomainError("METRON_INVALID_OPERATION")
 
 
 def main() -> int:
     try:
-        result=execute(parser().parse_args())
+        args=parser().parse_args()
+        result=execute(args)
+        if args.operation in DASHBOARD_REFRESH_OPERATIONS:
+            refresh_existing_dashboard()
         print(json.dumps({"ok":True,"data":result},separators=(",",":"),default=str))
         return 0
     except finance.DomainError as exc:
