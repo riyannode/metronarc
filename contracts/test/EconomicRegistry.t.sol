@@ -101,24 +101,48 @@ contract EconomicRegistryTest is Test {
         assertEq(revenueAmount, 5_000_000);
         assertEq(earnedCapital, 500_000);
         assertGt(recordedAt, 0);
-        assertTrue(registry.usedRevenueEvidence(revenueHash));
+        assertTrue(registry.usedRevenueEvidence(wallet, revenueHash));
         vm.prank(wallet);
         vm.expectRevert(abi.encodeWithSelector(EconomicRegistry.RevenueAlreadyLinked.selector, wallet, spendId));
         registry.recordRevenue(spendId, keccak256("revenue-2"), 1, 0);
     }
 
-    function testRejectsRevenueForUnknownSpendAndDuplicateEvidence() public {
+    function testRejectsRevenueForUnknownSpend() public {
         bytes32 revenueHash = keccak256("revenue-1");
         vm.prank(wallet);
         vm.expectRevert(abi.encodeWithSelector(EconomicRegistry.SpendNotFound.selector, wallet, spendId));
         registry.recordRevenue(spendId, revenueHash, 1, 0);
+    }
+
+    function testRevenueEvidenceIsUniqueWithinWalletAcrossSpends() public {
+        bytes32 anotherSpendId = keccak256("spend-2");
+        bytes32 revenueHash = keccak256("revenue-1");
+        recordSpend(wallet, spendId);
+        recordSpend(wallet, anotherSpendId);
+        vm.prank(wallet);
+        registry.recordRevenue(spendId, revenueHash, 1, 0);
+        vm.prank(wallet);
+        vm.expectRevert(abi.encodeWithSelector(EconomicRegistry.RevenueAlreadyRecorded.selector, wallet, revenueHash));
+        registry.recordRevenue(anotherSpendId, revenueHash, 1, 0);
+    }
+
+    function testDifferentWalletsCanUseSameRevenueEvidence() public {
+        bytes32 revenueHash = keccak256("revenue-1");
         recordSpend(wallet, spendId);
         recordSpend(otherWallet, spendId);
         vm.prank(wallet);
         registry.recordRevenue(spendId, revenueHash, 1, 0);
         vm.prank(otherWallet);
-        vm.expectRevert(abi.encodeWithSelector(EconomicRegistry.RevenueAlreadyRecorded.selector, revenueHash));
         registry.recordRevenue(spendId, revenueHash, 1, 0);
+        assertTrue(registry.usedRevenueEvidence(wallet, revenueHash));
+        assertTrue(registry.usedRevenueEvidence(otherWallet, revenueHash));
+    }
+
+    function testWalletCannotLinkRevenueToAnotherWalletsSpend() public {
+        recordSpend(wallet, spendId);
+        vm.prank(otherWallet);
+        vm.expectRevert(abi.encodeWithSelector(EconomicRegistry.SpendNotFound.selector, otherWallet, spendId));
+        registry.recordRevenue(spendId, keccak256("revenue-1"), 1, 0);
     }
 
     function testRejectsInvalidRevenueFields() public {
