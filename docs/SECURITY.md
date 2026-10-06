@@ -19,4 +19,11 @@ The AI host receives the prompts and context the user provides, subject to that 
 - **METRON local core:** controls whether its own execution path permits an action, stores deterministic economic policy and canonical business records, reconciles Circle evidence, and derives any registry commitments. It cannot prevent the wallet owner from using Circle outside METRON.
 - **EconomicRegistry:** records immutable commitments after METRON reconciliation. It holds no company money, has no token-transfer or payment path, is not a wallet or canonical accounting database, does not verify business truth, and does not enforce Circle spending policy.
 
+## Economic and commercial approval boundaries
+
+- `ALLOW` Spend Intents become `APPROVED` automatically. `ESCALATE` Spend Intents require explicit persisted human approval. `DENY` is terminal. Human approval of an escalated intent rechecks and cannot bypass the absolute daily-spend or available-operating-capital caps; both caps are also rechecked atomically before dispatch reservation to stop a stale approval exceeding the current day's limit.
+- Exceeding `max_spend_per_action` escalates; exceeding `max_daily_spend` or seed budget plus earned operating capital denies. Falling below `minimum_expected_roi_bps` denies. Before dispatch, the re-estimated approved maximum plus `minimum_wallet_balance` must fit in the live Circle wallet balance; failure denies dispatch.
+- Deals below `minimum_deal`, deals marked `custom_or_legal_terms: true`, and deals with non-payer-wallet `terms` fields require persisted pre-acceptance human approval. Customer acceptance always enters `PENDING_HUMAN` and requires a separate final decision before invoice creation. `deal-update` cannot set either approval state.
+- EconomicRegistry recording is `INACTIVE / DEFERRED` in this build. No spend/revenue records are currently mirrored. A later integration must persist idempotency state and reconcile registry writes independently from Circle payment execution.
+
 Bind evidence to its source document and expected counterparty. Consume each provider reference once. If dispatch outcome is ambiguous, preserve `UNKNOWN`, query authoritative state, and do not blindly retry. Never include wallet credentials, Circle session files, OTPs, private keys, runtime SQLite, or real customer private data in the repository.

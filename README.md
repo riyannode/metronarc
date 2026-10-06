@@ -64,6 +64,8 @@ Circle Agent Wallet is the sole operating-money account. Fund that wallet direct
 
 `EconomicRegistry` is a shared, non-custodial contract for optional immutable provenance records after local reconciliation. It cannot hold or transfer funds, execute payments, or establish business truth. Its canonical address is project infrastructure and is not a user setting; this repository does not deploy it or depend on it for payments.
 
+Spend `ALLOW` is automatically persisted as `APPROVED`; `ESCALATE` requires explicit persisted human approval, and `DENY` is terminal. Exceeding `max_spend_per_action` escalates. Exceeding `max_daily_spend`, available seed-plus-earned operating capital, or falling below `minimum_expected_roi_bps` denies, and human approval cannot bypass those hard limits. Below-minimum deals, deals marked `custom_or_legal_terms: true`, and deals with non-payer-wallet terms require pre-acceptance human approval. Customer acceptance always moves the deal to `PENDING_HUMAN`; a distinct final approval is required before invoice creation.
+
 ## Scope and limitations
 
 - Circle Agent Wallet and Circle CLI are the only implemented payment provider.

@@ -69,7 +69,7 @@ def build_dashboard(db) -> str:
     counts=status.get("counts") or {}
     metrics=[
         ("Revenue goal",goal.get("target")),("Revenue generated",goal.get("revenue_generated")),
-        ("Operating cash",goal.get("operating_cash_journal_balance")),("Reserve cash",goal.get("reserve_journal_balance")),
+        ("Operating cash",goal.get("operating_cash_journal_balance")),
         ("Total spend",goal.get("spend")),("Net contribution",goal.get("net_contribution")),
         ("Return on spend",None if goal.get("return_on_spend_bps") is None else f"{goal['return_on_spend_bps']//100}.{goal['return_on_spend_bps']%100:02d}%"),
         ("Deals",counts.get("deals",0)),("Pending approval",counts.get("pending_approvals",0)),("Open invoices",counts.get("open_invoices",0)),
@@ -150,7 +150,9 @@ def execute(args: argparse.Namespace) -> object:
             minimum=db.execute("SELECT minimum_wallet_balance_atomic FROM policies WHERE goal_id=?",(intent["goal_id"],)).fetchone()[0]
             if balance<intent["max_cost_atomic"]+minimum: raise finance.DomainError("METRON_MINIMUM_WALLET_BALANCE_VIOLATION")
             with store.transaction(db):
-                changed=db.execute("UPDATE spend_intents SET status='SUBMITTED' WHERE id=? AND status='APPROVED'",(intent_id,)).rowcount
+                denied=finance.enforce_dispatch_limits(db,intent)
+                if denied: return denied
+                changed=db.execute("UPDATE spend_intents SET status='SUBMITTED',executed_at=? WHERE id=? AND status='APPROVED'",(finance.now(),intent_id)).rowcount
                 if changed!=1: raise finance.DomainError("METRON_SPEND_ALREADY_EXECUTED")
                 store.event(db,"SPEND_SUBMITTED","spend_intent",intent_id,"Circle service payment dispatch marker recorded",{"max_cost_atomic":intent["max_cost_atomic"]},finance.now())
             provider_ref=None; provider_amount=None

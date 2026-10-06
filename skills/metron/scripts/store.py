@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS deals (
   id TEXT PRIMARY KEY, counterparty_id TEXT NOT NULL REFERENCES counterparties(id), goal_id TEXT NOT NULL REFERENCES goals(id),
   amount_atomic INTEGER NOT NULL CHECK (amount_atomic > 0), currency TEXT NOT NULL, terms_json TEXT NOT NULL,
   minimum_deal_approved INTEGER NOT NULL DEFAULT 0 CHECK (minimum_deal_approved IN (0,1)),
+  custom_or_legal_terms INTEGER NOT NULL DEFAULT 0 CHECK (custom_or_legal_terms IN (0,1)),
+  custom_terms_approved INTEGER NOT NULL DEFAULT 0 CHECK (custom_terms_approved IN (0,1)),
   status TEXT NOT NULL CHECK (status IN ('PROSPECTING','NEGOTIATING','CUSTOMER_ACCEPTED','PENDING_HUMAN','HUMAN_APPROVED','HUMAN_REJECTED','INVOICED','CLOSED_WON','CLOSED_LOST')),
   accepted_at TEXT, approved_at TEXT, created_at TEXT NOT NULL
 );
@@ -133,6 +135,10 @@ def initialize() -> dict[str, str]:
         deal_columns={row[1] for row in db.execute("PRAGMA table_info(deals)")}
         if "minimum_deal_approved" not in deal_columns:
             db.execute("ALTER TABLE deals ADD COLUMN minimum_deal_approved INTEGER NOT NULL DEFAULT 0 CHECK (minimum_deal_approved IN (0,1))")
+        if "custom_or_legal_terms" not in deal_columns:
+            db.execute("ALTER TABLE deals ADD COLUMN custom_or_legal_terms INTEGER NOT NULL DEFAULT 0 CHECK (custom_or_legal_terms IN (0,1))")
+        if "custom_terms_approved" not in deal_columns:
+            db.execute("ALTER TABLE deals ADD COLUMN custom_terms_approved INTEGER NOT NULL DEFAULT 0 CHECK (custom_terms_approved IN (0,1))")
         db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_spend_provider_payment_id ON spend_intents(provider_payment_id)")
     if not CONFIG.exists():
         write_config({"chain": "ARC-TESTNET", "operating_wallet": None})

@@ -17,8 +17,8 @@ The CLI returns stable codes in `{"ok":false,"error":{"code":...,"message":...}}
 | `METRON_INVALID_OPERATION` | Choose an operation listed by `run.py --help`. |
 | `METRON_CIRCLE_TERMS_CONSENT_REQUIRED` | Circle Terms were not accepted by the user. Show the current Terms and Privacy Policy links and continue only after explicit consent. |
 | `METRON_CIRCLE_TERMS_ACCEPTANCE_FAILED` | Circle did not report the current Terms as accepted after the user-approved acceptance command. Do not retry automatically. |
-| `METRON_SPEND_DENIED` | Hard spend policy rejected this intent, or the latest no-payment estimate exceeds the approved maximum or no longer matches the approved seller or chain. No payment was dispatched. |
-| `METRON_SPEND_ESCALATION_REQUIRED` | A human decision is required before execution. |
+| `METRON_SPEND_DENIED` | A hard spend policy denied this intent, or the latest no-payment estimate exceeds the approved maximum or no longer matches the approved seller or chain. `DENY` cannot be human-overridden; no payment was dispatched. |
+| `METRON_SPEND_ESCALATION_REQUIRED` | The intent is `ESCALATED`; record explicit `spend-approve` approval before execution. This does not bypass daily or available-capital hard limits. |
 | `METRON_SPEND_NOT_FOUND` | The requested Spend Intent ID does not exist. |
 | `METRON_SPEND_NOT_ESCALATED` | Only an escalated Spend Intent can be approved through `spend-approve`. |
 | `METRON_MINIMUM_WALLET_BALANCE_VIOLATION` | The Circle wallet cannot cover the approved maximum while retaining the configured minimum wallet balance; no payment was dispatched. |
@@ -28,6 +28,7 @@ The CLI returns stable codes in `{"ok":false,"error":{"code":...,"message":...}}
 | `METRON_COUNTERPARTY_UNVERIFIED` | Incoming payment does not match the customer wallet stored in deal terms. |
 | `METRON_INVALID_DEAL` | Deal amount, customer, terms, or payer wallet is invalid. |
 | `METRON_DEAL_BELOW_MINIMUM` | Obtain and persist a human exception approval before accepting terms below the goal's minimum deal value. |
+| `METRON_CUSTOM_TERMS_APPROVAL_REQUIRED` | Custom or legal commercial terms need explicit persisted human approval before customer acceptance. |
 | `METRON_DEAL_NOT_FOUND` | The requested deal ID does not exist. |
 | `METRON_INVALID_DEAL_TRANSITION` | The requested deal status transition is not allowed. |
 | `METRON_CIRCLE_NOT_INSTALLED` | Circle CLI was not found in PATH. |
@@ -54,5 +55,6 @@ The CLI returns stable codes in `{"ok":false,"error":{"code":...,"message":...}}
 - `METRON_PAYMENT_AMBIGUOUS`, `METRON_CIRCLE_TIMEOUT` after dispatch, and `METRON_GATEWAY_STATUS_UNAVAILABLE` do not authorize another payment. Keep the intent `UNKNOWN` and retry only the read-only reconciliation query. Create a new intent only after authoritative Circle state proves the prior payment did not occur.
 - Validation and policy errors returned before dispatch are safe to correct and re-propose; do not reuse an intent already marked `SUBMITTED`, `UNKNOWN`, or `EXECUTED`.
 - `METRON_DEAL_BELOW_MINIMUM` requires explicit human exception approval through `deal-approve`; customer acceptance still triggers its own separate approval gate.
+- `METRON_CUSTOM_TERMS_APPROVAL_REQUIRED` requires explicit pre-acceptance `deal-approve`; customer acceptance still triggers its own separate final approval gate.
 - `METRON_HUMAN_APPROVAL_REQUIRED` needs a direct human decision.
 - `METRON_CIRCLE_NOT_AUTHENTICATED` requires the wallet owner to complete the email OTP in Circle CLI. Never store the OTP in METRON state or repository files.
