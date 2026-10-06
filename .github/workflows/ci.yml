@@ -25,7 +25,7 @@ jobs:
           METRON_HOME="$state" python3 -B skills/metron/scripts/run.py init
           METRON_HOME="$state" python3 -B skills/metron/scripts/run.py status
           METRON_HOME="$state" python3 -B skills/metron/scripts/run.py dashboard --no-open
-          grep -q '<title>METRON ledger</title>' "$state/dashboard.html"
+          grep -q '<title>METRON · Economic Operations</title>' "$state/dashboard.html"
           if grep -Eq 'METRON_(METRICS|SECTIONS|STATUS)' "$state/dashboard.html"; then exit 1; fi
   contracts:
     runs-on: ubuntu-latest
