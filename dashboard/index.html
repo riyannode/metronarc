@@ -3,20 +3,109 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>METRON ledger</title>
+  <meta name="color-scheme" content="light">
+  <title>METRON · Economic Operations</title>
   <style>
-    body{margin:0;background:#101514;color:#e8eee8;font:15px/1.5 system-ui,sans-serif}main{max-width:1180px;margin:40px auto;padding:0 22px}h1{font-size:32px;margin-bottom:2px}header p{color:#9eaaa2;margin-top:0}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:26px 0}article,section{background:#19211e;border:1px solid #2c3932;border-radius:12px;padding:16px}article strong,article small{display:block}article small{color:#9eaaa2}article strong{font-size:20px;margin-top:8px}section{margin:14px 0}h2{font-size:17px}.scroll{overflow:auto}table{border-collapse:collapse;width:100%;font-size:13px}th,td{text-align:left;padding:8px;border-bottom:1px solid #2c3932;white-space:nowrap}th{color:#9eaaa2}footer{color:#9eaaa2;margin:20px 0}
+    :root{font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#17263c;background:#f3f6fa;font-synthesis:none;text-rendering:optimizeLegibility;font-size:14px;--ink:#17263c;--muted:#64748b;--line:#dce3ec;--paper:#fff;--blue:#315f9d;--pale-blue:#edf4fc;--green:#24684b;--pale-green:#eaf5ee;--amber:#825514;--pale-amber:#fff5df;--red:#9c3f43;--pale-red:#fbecee;--slate:#526176;--pale-slate:#eff2f6}
+    *{box-sizing:border-box}
+    body{margin:0;min-width:320px;background:#f3f6fa;color:var(--ink);font-size:14px;line-height:1.45}
+    a{color:#285990}
+    a:focus-visible{outline:3px solid #79a9e4;outline-offset:3px;border-radius:3px}
+    .shell{width:min(calc(100% - 48px),1680px);margin:0 0 0 24px;padding:22px 0 34px}
+    .topbar{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:0 0 17px;border-bottom:1px solid var(--line)}
+    .identity{display:flex;align-items:center;gap:14px;min-width:0}
+    .mark{display:grid;place-items:center;width:40px;height:40px;border:1px solid #bdcde0;border-radius:8px;background:#fff;color:#2e5889;font-size:17px;font-weight:750;letter-spacing:-.06em}
+    .brand{margin:0;color:#16253a;font-size:17px;font-weight:750;letter-spacing:.075em;line-height:1.1}
+    .product-name{margin:4px 0 0;color:#526176;font-size:12px}
+    .header-meta{display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap}
+    .flag{display:inline-flex;align-items:center;min-height:25px;padding:3px 9px;border:1px solid #cfdae7;border-radius:5px;background:#fff;color:#40536d;font-size:10px;font-weight:750;letter-spacing:.075em;white-space:nowrap}
+    .flag--local{border-color:#c5ddcd;background:#f1f8f3;color:#326547}
+    .generated{margin-left:8px;color:#718096;font-size:11px;white-space:nowrap}
+    .overview{padding:24px 0 0;scroll-margin-top:16px}
+    .overview-head{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:14px}
+    .eyebrow{margin:0 0 5px;color:#6d7c90;font-size:10px;font-weight:750;letter-spacing:.11em;text-transform:uppercase}
+    h1{margin:0;font-size:21px;font-weight:680;letter-spacing:-.025em;line-height:1.2}
+    .goal-state{display:flex;align-items:center;gap:8px;color:#5d6c80;font-size:12px}
+    .goal-state:before{width:7px;height:7px;border-radius:50%;background:#7897bd;content:""}
+    .primary-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+    .metric{min-width:0;padding:12px 13px;border:1px solid var(--line);border-radius:7px;background:var(--paper)}
+    .metric span{display:block;color:#64748b;font-size:11px;font-weight:550;line-height:1.3}
+    .metric strong{display:block;margin-top:7px;color:#182a42;font-size:16px;font-weight:680;letter-spacing:-.02em;line-height:1.25;overflow-wrap:anywhere}
+    .metric--primary{min-height:83px;padding:14px 15px;box-shadow:0 1px 2px #2036530b}
+    .metric--primary span{font-size:11px}
+    .metric--primary strong{font-size:19px}
+    .capital-layout{display:grid;grid-template-columns:minmax(240px,.85fr) minmax(0,2.15fr);gap:12px;margin:14px 0 24px;scroll-margin-top:16px}
+    .panel{min-width:0;margin:0 0 12px;padding:15px 16px;border:1px solid var(--line);border-radius:7px;background:var(--paper);box-shadow:0 1px 2px #20365308;scroll-margin-top:16px}
+    .capital-panel{margin:0}
+    .section-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin-bottom:12px}
+    h2{margin:0;color:#1d2c42;font-size:15px;font-weight:680;letter-spacing:-.012em}
+    .section-heading .eyebrow{margin-bottom:3px}
+    .capital-facts{display:grid;gap:8px;margin-top:15px}
+    .capital-facts>div{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding-bottom:7px;border-bottom:1px solid #edf0f4}
+    .capital-facts span{color:#617087;font-size:11px}
+    .capital-facts strong{font-size:12px;font-weight:650;text-align:right}
+    .note{margin:12px 0 0;color:#718096;font-size:10px;line-height:1.5}
+    .secondary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+    .secondary-grid .metric{padding:10px 11px;border-radius:6px}
+    .secondary-grid .metric strong{font-size:14px}
+    .row-count{color:#7a8798;font-size:10px;white-space:nowrap}
+    .scroll{overflow:auto;max-width:100%;border:1px solid #e6ebf1;border-radius:5px;scrollbar-color:#c3ccd8 #f3f5f8;scrollbar-width:thin}
+    table{width:100%;border-collapse:separate;border-spacing:0;font-size:11px;text-align:left}
+    th,td{padding:9px 10px;border-bottom:1px solid #e9edf2;vertical-align:middle}
+    th{background:#f6f8fb;color:#5d6d82;font-size:9px;font-weight:750;letter-spacing:.065em;text-transform:uppercase;white-space:nowrap}
+    tbody tr:last-child td{border-bottom:0}
+    tbody tr:hover{background:#f9fbfd}
+    td{color:#304057;white-space:nowrap}
+    td .summary{max-width:270px}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10px;font-variant-ligatures:none}
+    .clipped{display:inline-block;max-width:220px;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom;white-space:nowrap}
+    .badge{display:inline-flex;align-items:center;min-height:20px;padding:2px 7px;border:1px solid transparent;border-radius:4px;font-size:9px;font-weight:750;letter-spacing:.035em;line-height:1.2;white-space:nowrap}
+    .badge:before{width:5px;height:5px;margin-right:5px;border-radius:50%;background:currentColor;content:""}
+    .badge--approved,.badge--confirmed,.badge--reconciled,.badge--human-approved,.badge--paid,.badge--closed-won,.badge--allow{border-color:#c9e2d1;background:var(--pale-green);color:var(--green)}
+    .badge--escalated,.badge--pending-human,.badge--unknown,.badge--customer-accepted,.badge--negotiating{border-color:#f0dcaf;background:var(--pale-amber);color:var(--amber)}
+    .badge--denied,.badge--failed,.badge--human-rejected,.badge--closed-lost,.badge--deny,.badge--void{border-color:#edc9cd;background:var(--pale-red);color:var(--red)}
+    .badge--submitted,.badge--executed,.badge--invoiced,.badge--posted,.badge--open,.badge--prospecting,.badge--created,.badge--proposed,.badge--draft,.badge--escalate{border-color:#d1ddea;background:var(--pale-blue);color:#345e8f}
+    .badge--neutral{border-color:#dce2e9;background:var(--pale-slate);color:var(--slate)}
+    .direction{display:inline-flex;min-width:30px;justify-content:center;padding:2px 5px;border:1px solid #dce3ec;border-radius:4px;color:#465970;font-size:9px;font-weight:750;letter-spacing:.04em}
+    .currency{color:#526176;font-size:9px;font-weight:650;letter-spacing:.025em}
+    .muted{color:#718096}
+    .money{font-variant-numeric:tabular-nums}
+    .tx-link{font-weight:650;text-decoration:none}
+    .tx-link:hover{text-decoration:underline;text-underline-offset:2px}
+    .tx-link span{font-family:system-ui,sans-serif}
+    .journal-lines{display:grid;gap:4px;min-width:190px;color:#53647a;font-size:10px}
+    .journal-lines b{color:#30435e;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:9px}
+    .empty-state{margin:0;padding:17px 12px;border:1px dashed #d8e0e9;border-radius:5px;background:#fafbfd;color:#6a788b;font-size:12px;text-align:center}
+    .page-nav{display:flex;gap:5px;overflow-x:auto;padding:11px 0;border-bottom:1px solid var(--line);scrollbar-width:thin}
+    .page-nav a{padding:5px 8px;border-radius:4px;color:#52647b;font-size:10px;font-weight:600;text-decoration:none;white-space:nowrap}
+    .page-nav a:hover{background:#e8eef6;color:#234e83}
+    footer{display:flex;justify-content:space-between;gap:16px;margin-top:8px;padding:12px 2px 0;border-top:1px solid var(--line);color:#718096;font-size:10px}
+    [hidden]{display:none!important}
+    @media(max-width:1120px){.primary-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.capital-layout{grid-template-columns:1fr}.secondary-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+    @media(max-width:720px){.shell{width:calc(100% - 32px);margin-left:16px;padding-top:16px}.topbar{align-items:flex-start;flex-direction:column;gap:12px}.header-meta{justify-content:flex-start}.generated{width:100%;margin:4px 0 0}.overview{padding-top:19px}.overview-head{align-items:flex-start;flex-direction:column;gap:8px}.primary-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.metric--primary{min-height:78px}.metric--primary strong{font-size:17px}.secondary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.panel{padding:12px}.capital-layout{margin-top:10px}.page-nav{margin:0 -2px}footer{flex-direction:column}.scroll table{min-width:760px}#evidence .scroll table{min-width:1120px}}
+    @media(max-width:390px){.primary-grid{grid-template-columns:1fr}.secondary-grid{grid-template-columns:1fr 1fr}.metric--primary strong{font-size:17px}}
   </style>
 </head>
 <body>
-  <main>
-    <header>
-      <h1>METRON</h1>
-      <p>Local, read-only economic ledger · Circle balances are queried separately</p>
+  <main class="shell">
+    <header class="topbar">
+      <div class="identity"><div class="mark" aria-hidden="true">M</div><div><p class="brand">METRON</p><p class="product-name">Economic Operations</p></div></div>
+      <div class="header-meta" aria-label="Dashboard status">
+        <span class="flag flag--local">LOCAL</span><span class="flag">READ ONLY</span><span class="flag"><!-- METRON_CHAIN --></span>
+        <time class="generated" datetime="<!-- METRON_GENERATED -->">Generated <!-- METRON_GENERATED --></time>
+      </div>
     </header>
-    <div class="cards"><!-- METRON_METRICS --></div>
+    <nav class="page-nav" aria-label="Dashboard sections">
+      <a href="#overview">Overview</a><a href="#capital">Capital &amp; policy</a><a href="#spend-intents">Spend intents</a>
+      <a href="#payments">Payments</a><a href="#evidence">Payment evidence</a><a href="#deals">Deals &amp; approvals</a>
+      <a href="#invoices">Open invoices</a><a href="#journal">Journal</a><a href="#activity">Activity</a>
+    </nav>
+    <section class="overview" id="overview">
+      <div class="overview-head"><div><p class="eyebrow">FINANCIAL OPERATIONS</p><h1>Overview</h1></div><div class="goal-state"><!-- METRON_GOAL_STATE --></div></div>
+      <div class="primary-grid"><!-- METRON_PRIMARY_METRICS --></div>
+    </section>
     <!-- METRON_SECTIONS -->
-    <footer>Evidence and journal state are local SQLite records. <span hidden><!-- METRON_STATUS --></span></footer>
+    <footer><span>Local SQLite records · Read only · No live Circle wallet balance is shown here</span><span hidden aria-hidden="true"><!-- METRON_STATUS --></span></footer>
   </main>
 </body>
 </html>
