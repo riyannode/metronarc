@@ -150,6 +150,62 @@ class MetronRefactorTests(unittest.TestCase):
             self.assertEqual({row["account_code"] for row in journals}, {"1000", "1100", "4000"})
             self.assertEqual(sum(row["debit_atomic"] for row in journals), sum(row["credit_atomic"] for row in journals))
 
+    def test_budget_daily_action_roi_and_human_gates_remain_enforced(self):
+        store.initialize()
+        with store.connect() as db:
+            def create_goal(budget, daily, per_action, roi=0):
+                return finance.create_goal(db, {"revenue_target": "100", "policy": {
+                    "operating_budget": budget, "max_spend_per_action": per_action,
+                    "max_daily_spend": daily, "minimum_expected_roi_bps": roi,
+                }})["id"]
+
+            def propose(goal_id, cost, expected):
+                return finance.propose_spend(db, {
+                    "goal_id": goal_id, "service_url": "https://api.example.com/data", "http_method": "GET",
+                    "payment_scheme": "exact", "accepted_chains": ["ARC-TESTNET"],
+                    "payee_address": "0x" + "2" * 40, "purpose": "research", "reason": "research",
+                    "expected_output": "data", "quoted_cost": cost, "max_cost": cost,
+                    "expected_value": expected,
+                })
+
+            limited = create_goal("0.20", "0.15", "0.10")
+            escalated = propose(limited, "0.11", "1")
+            self.assertEqual(escalated["policy_result"], "ESCALATE")
+            finance.approve_spend(db, escalated["id"])
+            self.assertEqual(propose(limited, "0.05", "1")["policy_result"], "DENY")
+
+            budget_limited = create_goal("0.05", "0.05", "0.05")
+            self.assertEqual(propose(budget_limited, "0.05", "1")["policy_result"], "ALLOW")
+            self.assertEqual(propose(budget_limited, "0.01", "1")["policy_result"], "DENY")
+
+            roi_limited = create_goal("0.20", "0.20", "0.10", roi=20_000)
+            self.assertEqual(propose(roi_limited, "0.05", "0.01")["policy_result"], "DENY")
+
+    def test_unknown_spend_does_not_retry_circle_dispatch(self):
+        store.initialize()
+        with store.connect() as db:
+            goal = finance.create_goal(db, {"revenue_target": "100", "policy": {
+                "operating_budget": "20", "max_spend_per_action": "1", "max_daily_spend": "2",
+                "minimum_expected_roi_bps": 0,
+            }})
+            intent = finance.propose_spend(db, {
+                "goal_id": goal["id"], "service_url": "https://api.example.com/data", "http_method": "GET",
+                "payment_scheme": "exact", "accepted_chains": ["ARC-TESTNET"],
+                "payee_address": "0x" + "2" * 40, "purpose": "research", "reason": "research",
+                "expected_output": "data", "quoted_cost": "1", "expected_value": "1",
+            })
+            db.execute("UPDATE spend_intents SET status='UNKNOWN' WHERE id=?", (intent["id"],))
+        args = argparse.Namespace(operation="spend-execute", input=None, id=intent["id"])
+        with patch.object(run.circle, "service_estimate") as estimate, \
+             patch.object(run.circle, "wallet_balance") as balance, \
+             patch.object(run.circle, "service_pay") as pay:
+            with self.assertRaises(finance.DomainError) as raised:
+                run.execute(args)
+        self.assertEqual(raised.exception.code, "METRON_SPEND_DENIED")
+        estimate.assert_not_called()
+        balance.assert_not_called()
+        pay.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
