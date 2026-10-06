@@ -70,7 +70,7 @@ def create_goal(db: sqlite3.Connection, data: dict) -> dict:
     budget = atomic(policy.get("operating_budget"))
     per_action = atomic(policy.get("max_spend_per_action", "0.10"))
     daily = atomic(policy.get("max_daily_spend", "2"))
-    reserve = atomic(policy.get("reserve_floor", "0"))
+    minimum_wallet_balance = atomic(policy.get("minimum_wallet_balance", "0"))
     min_deal = atomic(policy.get("minimum_deal", "0"))
     roi_bps = int(policy.get("minimum_expected_roi_bps", 50000))
     reinvest_bps = int(policy.get("reinvestment_bps", 1000))
@@ -80,8 +80,8 @@ def create_goal(db: sqlite3.Connection, data: dict) -> dict:
         goal_id = store.next_id(db, "goals", "GOAL")
         db.execute("INSERT INTO goals(id,revenue_target_atomic,currency,status,created_at) VALUES (?,?,?,?,?)", (goal_id,target,"USDC","ACTIVE",timestamp))
         db.execute(
-            "INSERT INTO policies(id,goal_id,operating_budget_atomic,max_spend_per_action_atomic,max_daily_spend_atomic,reserve_floor_atomic,minimum_expected_roi_bps,reinvestment_bps,minimum_deal_atomic,require_human_on_customer_acceptance,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            ("POL-" + goal_id[5:],goal_id,budget,per_action,daily,reserve,roi_bps,reinvest_bps,min_deal,1,timestamp,timestamp),
+            "INSERT INTO policies(id,goal_id,operating_budget_atomic,max_spend_per_action_atomic,max_daily_spend_atomic,minimum_wallet_balance_atomic,minimum_expected_roi_bps,reinvestment_bps,minimum_deal_atomic,require_human_on_customer_acceptance,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("POL-" + goal_id[5:],goal_id,budget,per_action,daily,minimum_wallet_balance,roi_bps,reinvest_bps,min_deal,1,timestamp,timestamp),
         )
         store.event(db,"GOAL_CREATED","goal",goal_id,"Revenue goal and policy created",{"target_atomic":target,"budget_atomic":budget},timestamp)
     return {"id":goal_id,"revenue_target":"%s USDC"%display(target),"operating_budget":"%s USDC"%display(budget)}
@@ -351,55 +351,6 @@ def reconcile_invoice(db: sqlite3.Connection, invoice_id: str, evidence: dict) -
     return {"invoice_id":invoice_id,"status":"PAID","payment_entry_id":entry,"evidence_id":ev,"journal_id":journal,"reinvestment":"%s USDC"%display(reinvest)}
 
 
-def create_internal_transfer(db: sqlite3.Connection, kind: str, reference: str, amount: int, data: dict) -> dict:
-    if kind not in {"VAULT_RELEASE","RESERVE_SWEEP"} or amount<=0:
-        raise DomainError("METRON_INVALID_INPUT")
-    timestamp=now()
-    with store.transaction(db):
-        if db.execute("SELECT 1 FROM payment_entries WHERE source_type=? AND source_id=?",(kind,reference)).fetchone():
-            raise DomainError("METRON_SPEND_ALREADY_EXECUTED")
-        entry=store.next_id(db,"payment_entries","PE")
-        db.execute("INSERT INTO payment_entries(id,source_type,source_id,direction,amount_atomic,currency,provider,status,created_at) VALUES (?,?,?,'INTERNAL',?,'USDC','CIRCLE','SUBMITTED',?)",(entry,kind,reference,amount,timestamp))
-        store.event(db,"INTERNAL_TRANSFER_SUBMITTED", "payment_entry",entry,"Internal Circle transfer dispatch recorded before execution",data,timestamp)
-    return {"id":entry,"amount":"%s USDC"%display(amount),"status":"SUBMITTED"}
-
-
-def set_internal_submission(db: sqlite3.Connection, entry_id: str, result: dict) -> dict:
-    timestamp=now()
-    reference=str(result.get("provider_ref") or result.get("tx_hash") or "")
-    with store.transaction(db):
-        row=db.execute("SELECT * FROM payment_entries WHERE id=?",(entry_id,)).fetchone()
-        if row is None: raise DomainError("METRON_PAYMENT_NOT_FOUND")
-        if row["status"]!="SUBMITTED": raise DomainError("METRON_SPEND_ALREADY_EXECUTED")
-        if reference:
-            db.execute("UPDATE payment_entries SET provider_payment_id=? WHERE id=?",(reference,entry_id))
-        else:
-            db.execute("UPDATE payment_entries SET status='UNKNOWN' WHERE id=?",(entry_id,))
-        store.event(db,"INTERNAL_TRANSFER_AWAITING_CONFIRMATION","payment_entry",entry_id,"Circle submission recorded; settlement must be reconciled",{"provider_ref":reference or None,"tx_hash":result.get("tx_hash")},timestamp)
-    return {"id":entry_id,"status":"SUBMITTED" if reference else "UNKNOWN","provider_ref":reference or None}
-
-
-def confirm_internal_transfer(db: sqlite3.Connection, entry_id: str, evidence: dict, expected_destination: str, expected_direction: str) -> dict:
-    timestamp=now(); raw=json.dumps(evidence,sort_keys=True,separators=(",",":")); raw_hash=str(evidence.get("raw_evidence_hash") or hashlib.sha256(raw.encode()).hexdigest())
-    with store.transaction(db):
-        entry=db.execute("SELECT * FROM payment_entries WHERE id=?",(entry_id,)).fetchone()
-        if entry is None: raise DomainError("METRON_PAYMENT_NOT_FOUND")
-        if entry["source_type"] not in {"VAULT_RELEASE","RESERVE_SWEEP"} or entry["status"] not in {"SUBMITTED","UNKNOWN"}:
-            raise DomainError("METRON_SPEND_ALREADY_EXECUTED")
-        if entry["provider_payment_id"] != evidence.get("provider_ref") or evidence.get("status") not in {"confirmed","complete"} or evidence.get("currency")!="USDC" or evidence.get("direction")!=expected_direction or evidence.get("amount_atomic")!=entry["amount_atomic"] or str(evidence.get("to_address","")).lower()!=expected_destination.lower() or evidence.get("chain")!=store.read_config().get("chain","ARC-TESTNET"):
-            raise DomainError("METRON_RECONCILIATION_MISMATCH")
-        if db.execute("SELECT 1 FROM payment_evidence WHERE provider_ref=?",(entry["provider_payment_id"],)).fetchone():
-            raise DomainError("METRON_PAYMENT_ALREADY_CONSUMED")
-        ev=store.next_id(db,"payment_evidence","EV")
-        db.execute("INSERT INTO payment_evidence(id,payment_entry_id,provider,evidence_type,provider_ref,chain,tx_hash,from_address,to_address,amount_atomic,currency,raw_evidence_hash,observed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",(ev,entry_id,"CIRCLE","CIRCLE_TRANSACTION",entry["provider_payment_id"],evidence.get("chain"),evidence.get("tx_hash"),evidence.get("from_address"),evidence.get("to_address"),entry["amount_atomic"],"USDC",raw_hash,timestamp))
-        if entry["source_type"]=="VAULT_RELEASE": debit,credit="1000","1010"
-        else: debit,credit="1010","1000"
-        journal=post_journal(db,"PAYMENT_ENTRY",entry_id,"Confirmed internal capital transfer",debit,credit,entry["amount_atomic"],"USDC",timestamp)
-        db.execute("UPDATE payment_entries SET status='CONFIRMED',confirmed_at=? WHERE id=?",(timestamp,entry_id))
-        store.event(db,"INTERNAL_TRANSFER_CONFIRMED","payment_entry",entry_id,"Confirmed Circle transfer posted to the ledger",{"evidence_id":ev,"journal_id":journal},timestamp)
-    return {"id":entry_id,"status":"CONFIRMED","evidence_id":ev,"journal_id":journal}
-
-
 def listing(db: sqlite3.Connection, table: str, limit: int=25) -> list[dict]:
     allowed={"payment_entries","payment_evidence","journal_entries","events","sales_invoices","deals","spend_intents"}
     if table not in allowed: raise DomainError("METRON_INVALID_OPERATION")
@@ -433,7 +384,6 @@ def status(db: sqlite3.Connection) -> dict:
             "id":active["id"],"target":"%s USDC"%display(active["revenue_target_atomic"]),
             "revenue_generated":"%s USDC"%display(revenue),
             "operating_cash_journal_balance":"%s USDC"%display(balances.get("1000",0)),
-            "reserve_journal_balance":"%s USDC"%display(balances.get("1010",0)),
             "spend":"%s USDC"%display(spends),"net_contribution":"%s USDC"%display(revenue-spends),
             "return_on_spend_bps":(revenue*10000//spends if spends else None),
         },
@@ -445,7 +395,7 @@ def status(db: sqlite3.Connection) -> dict:
             "max_daily_spend":"%s USDC"%display(policy["max_daily_spend_atomic"]),
             "today_confirmed_spend":"%s USDC"%display(today_spent),
             "remaining_daily_authorization":"%s USDC"%display(max(0,policy["max_daily_spend_atomic"]-reserved_today)),
-            "reserve_floor":"%s USDC"%display(policy["reserve_floor_atomic"]),
+            "minimum_wallet_balance":"%s USDC"%display(policy["minimum_wallet_balance_atomic"]),
         },
         "counts":{
             "deals":db.execute("SELECT COUNT(*) FROM deals").fetchone()[0],

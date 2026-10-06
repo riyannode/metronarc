@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS policies (
   operating_budget_atomic INTEGER NOT NULL CHECK (operating_budget_atomic >= 0),
   max_spend_per_action_atomic INTEGER NOT NULL CHECK (max_spend_per_action_atomic >= 0),
   max_daily_spend_atomic INTEGER NOT NULL CHECK (max_daily_spend_atomic >= 0),
-  reserve_floor_atomic INTEGER NOT NULL CHECK (reserve_floor_atomic >= 0),
+  minimum_wallet_balance_atomic INTEGER NOT NULL CHECK (minimum_wallet_balance_atomic >= 0),
   minimum_expected_roi_bps INTEGER NOT NULL CHECK (minimum_expected_roi_bps >= 0),
   reinvestment_bps INTEGER NOT NULL CHECK (reinvestment_bps BETWEEN 0 AND 10000),
   minimum_deal_atomic INTEGER NOT NULL CHECK (minimum_deal_atomic >= 0),
@@ -123,6 +123,11 @@ def initialize() -> dict[str, str]:
             if name not in columns:
                 db.execute(f"ALTER TABLE spend_intents ADD COLUMN {name} {definition}")
         policy_columns={row[1] for row in db.execute("PRAGMA table_info(policies)")}
+        if "minimum_wallet_balance_atomic" not in policy_columns:
+            with transaction(db):
+                db.execute("ALTER TABLE policies ADD COLUMN minimum_wallet_balance_atomic INTEGER NOT NULL DEFAULT 0 CHECK (minimum_wallet_balance_atomic >= 0)")
+                if "reserve_floor_atomic" in policy_columns:
+                    db.execute("UPDATE policies SET minimum_wallet_balance_atomic=reserve_floor_atomic")
         if "reinvested_operating_capital_atomic" not in policy_columns:
             db.execute("ALTER TABLE policies ADD COLUMN reinvested_operating_capital_atomic INTEGER NOT NULL DEFAULT 0 CHECK (reinvested_operating_capital_atomic >= 0)")
         deal_columns={row[1] for row in db.execute("PRAGMA table_info(deals)")}
@@ -130,7 +135,12 @@ def initialize() -> dict[str, str]:
             db.execute("ALTER TABLE deals ADD COLUMN minimum_deal_approved INTEGER NOT NULL DEFAULT 0 CHECK (minimum_deal_approved IN (0,1))")
         db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_spend_provider_payment_id ON spend_intents(provider_payment_id)")
     if not CONFIG.exists():
-        write_config({"chain": "ARC-TESTNET", "operating_wallet": None, "vault_address": None})
+        write_config({"chain": "ARC-TESTNET", "operating_wallet": None})
+    else:
+        config=read_config()
+        if "vault_address" in config:
+            config.pop("vault_address")
+            write_config(config)
     return {"database": str(DATABASE), "config": str(CONFIG)}
 
 

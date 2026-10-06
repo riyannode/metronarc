@@ -21,7 +21,7 @@ The CLI returns stable codes in `{"ok":false,"error":{"code":...,"message":...}}
 | `METRON_SPEND_ESCALATION_REQUIRED` | A human decision is required before execution. |
 | `METRON_SPEND_NOT_FOUND` | The requested Spend Intent ID does not exist. |
 | `METRON_SPEND_NOT_ESCALATED` | Only an escalated Spend Intent can be approved through `spend-approve`. |
-| `METRON_WALLET_BALANCE_INSUFFICIENT` | Circle's current USDC balance is below the approved maximum; no payment was dispatched. |
+| `METRON_MINIMUM_WALLET_BALANCE_VIOLATION` | The Circle wallet cannot cover the approved maximum while retaining the configured minimum wallet balance; no payment was dispatched. |
 | `METRON_SPEND_ALREADY_EXECUTED` | Intent was already dispatched; inspect evidence and Circle state. |
 | `METRON_SPEND_REQUEST_CHANGED` | Execution body differs from the proposal request hash. Re-propose the reviewed request. |
 | `METRON_SPEND_CONTEXT_REQUIRED` | An older Spend Intent lacks a bound seller; do not dispatch it. Create a new intent from current inspection data. |
@@ -44,17 +44,15 @@ The CLI returns stable codes in `{"ok":false,"error":{"code":...,"message":...}}
 | `METRON_INVOICE_NOT_FOUND` | The requested invoice ID does not exist. |
 | `METRON_HUMAN_APPROVAL_REQUIRED` | The deal has not passed its required human approval gate. |
 | `METRON_JOURNAL_UNBALANCED` | Accounting lines did not balance; transaction was rolled back. |
-| `METRON_VAULT_NOT_CONFIGURED` | Vault workflow needs a configured vault and Circle contract support. |
-| `METRON_VAULT_PAUSED` | The vault is paused; owner action is required to unpause it before release. |
-| `METRON_VAULT_POLICY_REJECTED` | Vault agent wallet or release amount violates the configured on-chain policy; inspect status and limits before proposing another release. |
+| `METRON_LEGACY_INTERNAL_TRANSFER_UNSUPPORTED` | This old internal vault/reserve transfer is retained as history and cannot be reconciled through current runtime operations. |
 | `METRON_WALLET_NOT_CONFIGURED` | Set the local Circle operating wallet before wallet or payment operations. |
 | `METRON_CONFLICT` | A database uniqueness or state constraint rejected the operation. |
 | `METRON_INVALID_ID_TABLE` | Internal ID generation was requested for an unsupported table. |
 
 ## Retry and approval boundaries
 
-- `METRON_PAYMENT_AMBIGUOUS`, `METRON_CIRCLE_TIMEOUT` after dispatch, and `METRON_GATEWAY_STATUS_UNAVAILABLE` do not authorize another payment or vault call. Keep the intent `UNKNOWN` and retry only the read-only reconciliation query. Create a new intent only after authoritative Circle state proves the prior payment did not occur.
+- `METRON_PAYMENT_AMBIGUOUS`, `METRON_CIRCLE_TIMEOUT` after dispatch, and `METRON_GATEWAY_STATUS_UNAVAILABLE` do not authorize another payment. Keep the intent `UNKNOWN` and retry only the read-only reconciliation query. Create a new intent only after authoritative Circle state proves the prior payment did not occur.
 - Validation and policy errors returned before dispatch are safe to correct and re-propose; do not reuse an intent already marked `SUBMITTED`, `UNKNOWN`, or `EXECUTED`.
 - `METRON_DEAL_BELOW_MINIMUM` requires explicit human exception approval through `deal-approve`; customer acceptance still triggers its own separate approval gate.
-- `METRON_HUMAN_APPROVAL_REQUIRED` needs a direct human decision. `METRON_VAULT_PAUSED` or `METRON_VAULT_POLICY_REJECTED` needs the vault owner to inspect or change on-chain policy before another release attempt.
+- `METRON_HUMAN_APPROVAL_REQUIRED` needs a direct human decision.
 - `METRON_CIRCLE_NOT_AUTHENTICATED` requires the wallet owner to complete the email OTP in Circle CLI. Never store the OTP in METRON state or repository files.

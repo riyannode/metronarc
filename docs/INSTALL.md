@@ -4,7 +4,7 @@
 
 - Python 3.11 or later.
 - Circle CLI for wallet and provider actions. The official CLI requires Node.js 20.18.2 or later.
-- Foundry only to build/test/deploy the contract.
+- Foundry only to build/test the optional provenance contract.
 
 ## Use the local plugin
 
@@ -12,7 +12,10 @@
 2. Install/enable METRON and start a fresh session.
 3. Ask `Use METRON. Show status.`
 4. Initialize with `python3 -B skills/metron/scripts/run.py init` if state does not exist.
-5. Create a goal from a JSON file with `goal-create --input path.json`.
+5. Configure `chain` and `operating_wallet`, authenticate the Circle Agent Wallet through Circle CLI, and fund that wallet directly.
+6. Create a goal from a JSON file with `goal-create --input path.json`.
+
+METRON does not require users to deploy or fund a contract. The optional EconomicRegistry address is trusted project configuration and is inactive until a supported deployment is explicitly configured by METRON.
 
 The repository marketplace uses the current portable root `plugin.json` format. Marketplace visibility and installation must be verified in the actual target client; parsing manifests alone is not installation verification.
 

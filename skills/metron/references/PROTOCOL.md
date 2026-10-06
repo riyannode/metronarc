@@ -4,9 +4,9 @@
 
 `PROPOSED -> ALLOW | DENY | ESCALATE -> APPROVED -> EXECUTED | FAILED | UNKNOWN`
 
-Every paid action gets an immutable Spend Intent first. It binds the inspected seller wallet, HTTP method, `exact` or `GatewayWalletBatched` payment scheme, service URL, approved maximum, and SHA-256 hash of the canonical request body. The inspected service must accept Arc Testnet, and the body must be identical at execution. Immediately before dispatch, Circle's no-payment estimate must still select the approved scheme on Arc Testnet with the approved seller and a price within the approved maximum. Policy uses exact integer USDC atomic units. A model-provided expected value informs ROI but is not proof. Per-action, daily, available-budget, and reserve constraints are deterministic. `UNKNOWN` is terminal for automatic dispatch; query authoritative Circle state before any further action.
+Every paid action gets an immutable Spend Intent first. It binds the inspected seller wallet, HTTP method, `exact` or `GatewayWalletBatched` payment scheme, service URL, approved maximum, and SHA-256 hash of the canonical request body. The inspected service must accept Arc Testnet, and the body must be identical at execution. Immediately before dispatch, Circle's no-payment estimate must still select the approved scheme on Arc Testnet with the approved seller and a price within the approved maximum. METRON then reads the current Circle Agent Wallet USDC balance and requires `balance >= approved_max_cost + minimum_wallet_balance`. Failure returns `METRON_MINIMUM_WALLET_BALANCE_VIOLATION` and dispatches no payment. Policy uses exact integer USDC atomic units. A model-provided expected value informs ROI but is not proof. Per-action, daily, available-budget, and minimum wallet balance constraints are deterministic. `UNKNOWN` is terminal for automatic dispatch; query authoritative Circle state before any further action.
 
-Confirmed invoice receipts add `amount * reinvestment_bps // 10000` to earned operating capital in the same SQLite transaction as payment reconciliation. Later spend decisions use seed operating budget plus earned operating capital; per-action and daily limits continue to apply. This is a derived allocation, not a reserve sweep or automatic on-chain transfer.
+Confirmed invoice receipts add `amount * reinvestment_bps // 10000` to earned operating capital in the same SQLite transaction as payment reconciliation. Wallet funding, internal transfers, registry records, claims, and submissions do not increase earned capital. Later spend decisions use seed operating budget plus earned operating capital; per-action and daily limits continue to apply.
 
 ## Payment evidence and accounting
 
@@ -17,8 +17,12 @@ Circle evidence is normalized into Payment Evidence and linked to one Payment En
 | x402 acquisition | 5000 Customer Acquisition Expense | 1000 USDC Operating Cash |
 | Posted invoice | 1100 Accounts Receivable | 4000 Revenue |
 | Reconciled customer payment | 1000 USDC Operating Cash | 1100 Accounts Receivable |
-| Reserve funding | 1010 USDC Vault / Reserve | 1000 USDC Operating Cash |
-| Operating release | 1000 USDC Operating Cash | 1010 USDC Vault / Reserve |
+
+Historical account `1010` lines may remain in old SQLite databases; they are legacy records and no new operation posts to that account.
+
+## EconomicRegistry
+
+`EconomicRegistry` is one shared, non-custodial contract per supported network/profile. The Circle operating wallet is the namespace and must be the transaction caller. It records immutable hashes and atomic amounts for locally reconciled spend and revenue; it does not transfer tokens, execute x402, determine business truth, or grant spend authority. METRON derives identifiers and hashes from canonical SQLite records. This plugin build has no trusted registry address or recording operation, so onchain mirroring is inactive. Any later mirror must be retried and reconciled independently; its errors cannot change locally reconciled payment/accounting state or trigger another economic payment.
 
 ## Deal and invoice gates
 
