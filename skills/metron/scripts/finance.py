@@ -70,7 +70,7 @@ def create_goal(db: sqlite3.Connection, data: dict) -> dict:
     budget = atomic(policy.get("operating_budget"))
     per_action = atomic(policy.get("max_spend_per_action", "0.10"))
     daily = atomic(policy.get("max_daily_spend", "2"))
-    reserve = atomic(policy.get("reserve_floor", "0"))
+    minimum_wallet_balance = atomic(policy.get("minimum_wallet_balance", "0"))
     min_deal = atomic(policy.get("minimum_deal", "0"))
     roi_bps = int(policy.get("minimum_expected_roi_bps", 50000))
     reinvest_bps = int(policy.get("reinvestment_bps", 1000))
@@ -80,8 +80,8 @@ def create_goal(db: sqlite3.Connection, data: dict) -> dict:
         goal_id = store.next_id(db, "goals", "GOAL")
         db.execute("INSERT INTO goals(id,revenue_target_atomic,currency,status,created_at) VALUES (?,?,?,?,?)", (goal_id,target,"USDC","ACTIVE",timestamp))
         db.execute(
-            "INSERT INTO policies(id,goal_id,operating_budget_atomic,max_spend_per_action_atomic,max_daily_spend_atomic,reserve_floor_atomic,minimum_expected_roi_bps,reinvestment_bps,minimum_deal_atomic,require_human_on_customer_acceptance,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            ("POL-" + goal_id[5:],goal_id,budget,per_action,daily,reserve,roi_bps,reinvest_bps,min_deal,1,timestamp,timestamp),
+            "INSERT INTO policies(id,goal_id,operating_budget_atomic,max_spend_per_action_atomic,max_daily_spend_atomic,minimum_wallet_balance_atomic,minimum_expected_roi_bps,reinvestment_bps,minimum_deal_atomic,require_human_on_customer_acceptance,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("POL-" + goal_id[5:],goal_id,budget,per_action,daily,minimum_wallet_balance,roi_bps,reinvest_bps,min_deal,1,timestamp,timestamp),
         )
         store.event(db,"GOAL_CREATED","goal",goal_id,"Revenue goal and policy created",{"target_atomic":target,"budget_atomic":budget},timestamp)
     return {"id":goal_id,"revenue_target":"%s USDC"%display(target),"operating_budget":"%s USDC"%display(budget)}
@@ -135,8 +135,8 @@ def propose_spend(db: sqlite3.Connection, data: dict) -> dict:
         reason = "Policy limits and expected ROI pass"
         today = timestamp[:10]
         reserved_today = db.execute(
-            "SELECT COALESCE(SUM(max_cost_atomic),0) FROM spend_intents WHERE goal_id=? AND substr(created_at,1,10)=? AND status IN ('APPROVED','SUBMITTED','EXECUTED','UNKNOWN')",
-            (goal_id,today),
+            "SELECT COALESCE(SUM(max_cost_atomic),0) FROM spend_intents WHERE goal_id=? AND ((status='APPROVED' AND substr(created_at,1,10)=?) OR (status IN ('SUBMITTED','EXECUTED','UNKNOWN') AND substr(COALESCE(executed_at,created_at),1,10)=?))",
+            (goal_id,today,today),
         ).fetchone()[0]
         reserved_total = db.execute(
             "SELECT COALESCE(SUM(max_cost_atomic),0) FROM spend_intents WHERE goal_id=? AND status IN ('APPROVED','SUBMITTED','EXECUTED','UNKNOWN')",
@@ -173,14 +173,43 @@ def approve_spend(db: sqlite3.Connection, intent_id: str) -> dict:
         if row is None: raise DomainError("METRON_SPEND_NOT_FOUND")
         if row["status"] != "ESCALATED": raise DomainError("METRON_SPEND_NOT_ESCALATED")
         day=timestamp[:10]
-        reserved_today=db.execute("SELECT COALESCE(SUM(max_cost_atomic),0) FROM spend_intents WHERE goal_id=? AND id<>? AND substr(created_at,1,10)=? AND status IN ('APPROVED','SUBMITTED','EXECUTED','UNKNOWN')",(row["goal_id"],intent_id,day)).fetchone()[0]
+        reserved_today=db.execute("SELECT COALESCE(SUM(max_cost_atomic),0) FROM spend_intents WHERE goal_id=? AND id<>? AND ((status='APPROVED' AND substr(created_at,1,10)=?) OR (status IN ('SUBMITTED','EXECUTED','UNKNOWN') AND substr(COALESCE(executed_at,created_at),1,10)=?))",(row["goal_id"],intent_id,day,day)).fetchone()[0]
         reserved_total=db.execute("SELECT COALESCE(SUM(max_cost_atomic),0) FROM spend_intents WHERE goal_id=? AND id<>? AND status IN ('APPROVED','SUBMITTED','EXECUTED','UNKNOWN')",(row["goal_id"],intent_id)).fetchone()[0]
         available_budget=row["operating_budget_atomic"]+row["reinvested_operating_capital_atomic"]
         if reserved_today+row["max_cost_atomic"]>row["max_daily_spend_atomic"] or reserved_total+row["max_cost_atomic"]>available_budget:
-            raise DomainError("METRON_SPEND_DENIED")
+            db.execute("UPDATE spend_intents SET status='DENIED',policy_result='DENY' WHERE id=?",(intent_id,))
+            store.event(db,"SPEND_INTENT_DENY","spend_intent",intent_id,"A hard spend limit was reached before human approval",{},timestamp)
+            return {"id":intent_id,"status":"DENIED","policy_result":"DENY"}
         db.execute("UPDATE spend_intents SET status='APPROVED' WHERE id=?",(intent_id,))
         store.event(db,"SPEND_APPROVED","spend_intent",intent_id,"Human approved escalated spend",{},timestamp)
     return {"id":intent_id,"status":"APPROVED"}
+
+
+def deny_spend_for_hard_limit(db: sqlite3.Connection, intent_id: str, reason: str) -> dict:
+    timestamp=now()
+    changed=db.execute("UPDATE spend_intents SET status='DENIED',policy_result='DENY' WHERE id=? AND status='APPROVED'",(intent_id,)).rowcount
+    if changed!=1: raise DomainError("METRON_SPEND_ALREADY_EXECUTED")
+    store.event(db,"SPEND_INTENT_DENY","spend_intent",intent_id,reason,{},timestamp)
+    return {"id":intent_id,"status":"DENIED","policy_result":"DENY","reason":reason}
+
+
+def enforce_dispatch_limits(db: sqlite3.Connection, intent: sqlite3.Row) -> dict | None:
+    """Recheck absolute limits inside the transaction that reserves dispatch."""
+    policy=require_goal(db,intent["goal_id"])
+    timestamp=now(); today=timestamp[:10]
+    reserved_today=db.execute(
+        "SELECT COALESCE(SUM(max_cost_atomic),0) FROM spend_intents WHERE goal_id=? AND id<>? AND ((status='APPROVED' AND substr(created_at,1,10)=?) OR (status IN ('SUBMITTED','EXECUTED','UNKNOWN') AND substr(COALESCE(executed_at,created_at),1,10)=?))",
+        (intent["goal_id"],intent["id"],today,today),
+    ).fetchone()[0]
+    reserved_total=db.execute(
+        "SELECT COALESCE(SUM(max_cost_atomic),0) FROM spend_intents WHERE goal_id=? AND id<>? AND status IN ('APPROVED','SUBMITTED','EXECUTED','UNKNOWN')",
+        (intent["goal_id"],intent["id"]),
+    ).fetchone()[0]
+    if reserved_today+intent["max_cost_atomic"]>policy["max_daily_spend_atomic"]:
+        return deny_spend_for_hard_limit(db,intent["id"],"Daily spend cap was reached before dispatch")
+    if reserved_total+intent["max_cost_atomic"]>policy["operating_budget_atomic"]+policy["reinvested_operating_capital_atomic"]:
+        return deny_spend_for_hard_limit(db,intent["id"],"Available operating capital was reached before dispatch")
+    return None
 
 
 def record_spend_result(db: sqlite3.Connection, intent_id: str, result: dict) -> dict:
@@ -214,8 +243,11 @@ def record_spend_result(db: sqlite3.Connection, intent_id: str, result: dict) ->
 def create_deal(db: sqlite3.Connection,data: dict) -> dict:
     timestamp=now(); goal_id=str(data.get("goal_id","")); name=str(data.get("customer","")); amount=atomic(data.get("amount"))
     if not name or amount<=0: raise DomainError("METRON_INVALID_DEAL")
+    custom_or_legal_terms=data.get("custom_or_legal_terms",False)
+    if not isinstance(custom_or_legal_terms,bool): raise DomainError("METRON_INVALID_DEAL")
     terms=data.get("terms",{})
     if not isinstance(terms,dict): raise DomainError("METRON_INVALID_DEAL")
+    custom_or_legal_terms=custom_or_legal_terms or any(key!="payer_wallet" for key in terms)
     payer=terms.get("payer_wallet")
     if payer is not None and (not isinstance(payer,str) or len(payer)!=42 or not payer.startswith("0x") or any(ch not in "0123456789abcdefABCDEF" for ch in payer[2:])):
         raise DomainError("METRON_INVALID_DEAL")
@@ -223,20 +255,23 @@ def create_deal(db: sqlite3.Connection,data: dict) -> dict:
         policy=require_goal(db,goal_id)
         cp=store.next_id(db,"counterparties","CP"); deal=store.next_id(db,"deals","DEAL")
         db.execute("INSERT INTO counterparties(id,kind,name,external_ref,created_at) VALUES (?,?,?,?,?)",(cp,"PROSPECT",name,data.get("external_ref"),timestamp))
-        db.execute("INSERT INTO deals(id,counterparty_id,goal_id,amount_atomic,currency,terms_json,status,created_at) VALUES (?,?,?,?,?,?,?,?)",(deal,cp,goal_id,amount,"USDC",json.dumps(terms,sort_keys=True),"PROSPECTING",timestamp))
+        db.execute("INSERT INTO deals(id,counterparty_id,goal_id,amount_atomic,currency,terms_json,custom_or_legal_terms,status,created_at) VALUES (?,?,?,?,?,?,?,?,?)",(deal,cp,goal_id,amount,"USDC",json.dumps(terms,sort_keys=True),int(custom_or_legal_terms),"PROSPECTING",timestamp))
         store.event(db,"DEAL_CREATED","deal",deal,"Deal created",{"counterparty_id":cp},timestamp)
         if amount < policy["minimum_deal_atomic"]:
             store.event(db,"DEAL_BELOW_MINIMUM","deal",deal,"Deal value is below policy minimum",{},timestamp)
-    return {"id":deal,"counterparty_id":cp,"status":"PROSPECTING","policy_result":"ESCALATE" if amount < policy["minimum_deal_atomic"] else "ALLOW"}
+    reasons=[]
+    if amount < policy["minimum_deal_atomic"]: reasons.append("BELOW_MINIMUM_DEAL")
+    if custom_or_legal_terms: reasons.append("CUSTOM_OR_LEGAL_TERMS")
+    return {"id":deal,"counterparty_id":cp,"status":"PROSPECTING","policy_result":"ESCALATE" if reasons else "ALLOW","escalation_reasons":reasons}
 
 
 def update_deal(db: sqlite3.Connection, deal_id: str, status: str) -> dict:
-    timestamp=now(); allowed={"PROSPECTING","NEGOTIATING","CLOSED_LOST"}
-    if status not in allowed: raise DomainError("METRON_INVALID_DEAL_TRANSITION")
+    timestamp=now()
     with store.transaction(db):
         row=db.execute("SELECT status FROM deals WHERE id=?",(deal_id,)).fetchone()
         if row is None: raise DomainError("METRON_DEAL_NOT_FOUND")
-        if row["status"] not in {"PROSPECTING","NEGOTIATING"}: raise DomainError("METRON_INVALID_DEAL_TRANSITION")
+        transitions={"PROSPECTING":{"PROSPECTING","NEGOTIATING","CLOSED_LOST"},"NEGOTIATING":{"NEGOTIATING","CLOSED_LOST"}}
+        if status not in transitions.get(row["status"],set()): raise DomainError("METRON_INVALID_DEAL_TRANSITION")
         db.execute("UPDATE deals SET status=? WHERE id=?",(status,deal_id))
         store.event(db,"DEAL_STATUS_CHANGED","deal",deal_id,"Deal status changed",{"status":status},timestamp)
     return {"id":deal_id,"status":status}
@@ -253,9 +288,11 @@ def accept_deal(db: sqlite3.Connection, deal_id: str) -> dict:
     with store.transaction(db):
         row=db.execute("SELECT d.*,p.minimum_deal_atomic FROM deals d JOIN policies p ON p.goal_id=d.goal_id WHERE d.id=?",(deal_id,)).fetchone()
         if row is None: raise DomainError("METRON_DEAL_NOT_FOUND")
-        if row["status"] not in {"PROSPECTING","NEGOTIATING"}: raise DomainError("METRON_INVALID_DEAL_TRANSITION")
+        if row["status"] != "NEGOTIATING": raise DomainError("METRON_INVALID_DEAL_TRANSITION")
         if row["amount_atomic"]<row["minimum_deal_atomic"] and not row["minimum_deal_approved"]:
             raise DomainError("METRON_DEAL_BELOW_MINIMUM")
+        if row["custom_or_legal_terms"] and not row["custom_terms_approved"]:
+            raise DomainError("METRON_CUSTOM_TERMS_APPROVAL_REQUIRED")
         db.execute("UPDATE deals SET status='PENDING_HUMAN',accepted_at=? WHERE id=?",(timestamp,deal_id))
         db.execute("UPDATE counterparties SET kind='CUSTOMER' WHERE id=?",(row["counterparty_id"],))
         store.event(db,"CUSTOMER_ACCEPTED","deal",deal_id,"Customer accepted terms; waiting for human approval",{},timestamp)
@@ -267,16 +304,25 @@ def approve_deal(db: sqlite3.Connection, deal_id: str, approved: bool, payer_wal
     with store.transaction(db):
         row=db.execute("SELECT d.*,p.minimum_deal_atomic FROM deals d JOIN policies p ON p.goal_id=d.goal_id WHERE d.id=?",(deal_id,)).fetchone()
         if row is None: raise DomainError("METRON_DEAL_NOT_FOUND")
-        if row["status"] in {"PROSPECTING","NEGOTIATING"}:
-            if row["amount_atomic"]>=row["minimum_deal_atomic"] or row["minimum_deal_approved"]:
+        if row["status"] == "NEGOTIATING":
+            below_minimum=row["amount_atomic"]<row["minimum_deal_atomic"] and not row["minimum_deal_approved"]
+            custom_terms=row["custom_or_legal_terms"] and not row["custom_terms_approved"]
+            if not below_minimum and not custom_terms:
                 raise DomainError("METRON_HUMAN_APPROVAL_REQUIRED")
             if approved:
-                db.execute("UPDATE deals SET minimum_deal_approved=1 WHERE id=?",(deal_id,))
-                store.event(db,"DEAL_MINIMUM_EXCEPTION_APPROVED","deal",deal_id,"Human approved a below-minimum deal exception",{},timestamp)
-                return {"id":deal_id,"status":row["status"],"minimum_deal_approved":True}
+                if below_minimum:
+                    db.execute("UPDATE deals SET minimum_deal_approved=1 WHERE id=?",(deal_id,))
+                    store.event(db,"DEAL_MINIMUM_EXCEPTION_APPROVED","deal",deal_id,"Human approved a below-minimum deal exception",{},timestamp)
+                if custom_terms:
+                    db.execute("UPDATE deals SET custom_terms_approved=1 WHERE id=?",(deal_id,))
+                    store.event(db,"DEAL_CUSTOM_TERMS_APPROVED","deal",deal_id,"Human approved custom or legal commercial terms",{},timestamp)
+                return {"id":deal_id,"status":row["status"],"minimum_deal_approved":bool(row["minimum_deal_approved"] or below_minimum),"custom_terms_approved":bool(row["custom_terms_approved"] or custom_terms)}
+            if below_minimum:
+                store.event(db,"DEAL_MINIMUM_EXCEPTION_REJECTED","deal",deal_id,"Human rejected a below-minimum deal exception",{},timestamp)
+            if custom_terms:
+                store.event(db,"DEAL_CUSTOM_TERMS_REJECTED","deal",deal_id,"Human rejected custom or legal commercial terms",{},timestamp)
             db.execute("UPDATE deals SET status='CLOSED_LOST' WHERE id=?",(deal_id,))
-            store.event(db,"DEAL_MINIMUM_EXCEPTION_REJECTED","deal",deal_id,"Human rejected a below-minimum deal exception",{},timestamp)
-            return {"id":deal_id,"status":"CLOSED_LOST","minimum_deal_approved":False}
+            return {"id":deal_id,"status":"CLOSED_LOST","minimum_deal_approved":False,"custom_terms_approved":False}
         if row["status"] != "PENDING_HUMAN": raise DomainError("METRON_HUMAN_APPROVAL_REQUIRED")
         terms=json.loads(row["terms_json"])
         if approved:
@@ -351,55 +397,6 @@ def reconcile_invoice(db: sqlite3.Connection, invoice_id: str, evidence: dict) -
     return {"invoice_id":invoice_id,"status":"PAID","payment_entry_id":entry,"evidence_id":ev,"journal_id":journal,"reinvestment":"%s USDC"%display(reinvest)}
 
 
-def create_internal_transfer(db: sqlite3.Connection, kind: str, reference: str, amount: int, data: dict) -> dict:
-    if kind not in {"VAULT_RELEASE","RESERVE_SWEEP"} or amount<=0:
-        raise DomainError("METRON_INVALID_INPUT")
-    timestamp=now()
-    with store.transaction(db):
-        if db.execute("SELECT 1 FROM payment_entries WHERE source_type=? AND source_id=?",(kind,reference)).fetchone():
-            raise DomainError("METRON_SPEND_ALREADY_EXECUTED")
-        entry=store.next_id(db,"payment_entries","PE")
-        db.execute("INSERT INTO payment_entries(id,source_type,source_id,direction,amount_atomic,currency,provider,status,created_at) VALUES (?,?,?,'INTERNAL',?,'USDC','CIRCLE','SUBMITTED',?)",(entry,kind,reference,amount,timestamp))
-        store.event(db,"INTERNAL_TRANSFER_SUBMITTED", "payment_entry",entry,"Internal Circle transfer dispatch recorded before execution",data,timestamp)
-    return {"id":entry,"amount":"%s USDC"%display(amount),"status":"SUBMITTED"}
-
-
-def set_internal_submission(db: sqlite3.Connection, entry_id: str, result: dict) -> dict:
-    timestamp=now()
-    reference=str(result.get("provider_ref") or result.get("tx_hash") or "")
-    with store.transaction(db):
-        row=db.execute("SELECT * FROM payment_entries WHERE id=?",(entry_id,)).fetchone()
-        if row is None: raise DomainError("METRON_PAYMENT_NOT_FOUND")
-        if row["status"]!="SUBMITTED": raise DomainError("METRON_SPEND_ALREADY_EXECUTED")
-        if reference:
-            db.execute("UPDATE payment_entries SET provider_payment_id=? WHERE id=?",(reference,entry_id))
-        else:
-            db.execute("UPDATE payment_entries SET status='UNKNOWN' WHERE id=?",(entry_id,))
-        store.event(db,"INTERNAL_TRANSFER_AWAITING_CONFIRMATION","payment_entry",entry_id,"Circle submission recorded; settlement must be reconciled",{"provider_ref":reference or None,"tx_hash":result.get("tx_hash")},timestamp)
-    return {"id":entry_id,"status":"SUBMITTED" if reference else "UNKNOWN","provider_ref":reference or None}
-
-
-def confirm_internal_transfer(db: sqlite3.Connection, entry_id: str, evidence: dict, expected_destination: str, expected_direction: str) -> dict:
-    timestamp=now(); raw=json.dumps(evidence,sort_keys=True,separators=(",",":")); raw_hash=str(evidence.get("raw_evidence_hash") or hashlib.sha256(raw.encode()).hexdigest())
-    with store.transaction(db):
-        entry=db.execute("SELECT * FROM payment_entries WHERE id=?",(entry_id,)).fetchone()
-        if entry is None: raise DomainError("METRON_PAYMENT_NOT_FOUND")
-        if entry["source_type"] not in {"VAULT_RELEASE","RESERVE_SWEEP"} or entry["status"] not in {"SUBMITTED","UNKNOWN"}:
-            raise DomainError("METRON_SPEND_ALREADY_EXECUTED")
-        if entry["provider_payment_id"] != evidence.get("provider_ref") or evidence.get("status") not in {"confirmed","complete"} or evidence.get("currency")!="USDC" or evidence.get("direction")!=expected_direction or evidence.get("amount_atomic")!=entry["amount_atomic"] or str(evidence.get("to_address","")).lower()!=expected_destination.lower() or evidence.get("chain")!=store.read_config().get("chain","ARC-TESTNET"):
-            raise DomainError("METRON_RECONCILIATION_MISMATCH")
-        if db.execute("SELECT 1 FROM payment_evidence WHERE provider_ref=?",(entry["provider_payment_id"],)).fetchone():
-            raise DomainError("METRON_PAYMENT_ALREADY_CONSUMED")
-        ev=store.next_id(db,"payment_evidence","EV")
-        db.execute("INSERT INTO payment_evidence(id,payment_entry_id,provider,evidence_type,provider_ref,chain,tx_hash,from_address,to_address,amount_atomic,currency,raw_evidence_hash,observed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",(ev,entry_id,"CIRCLE","CIRCLE_TRANSACTION",entry["provider_payment_id"],evidence.get("chain"),evidence.get("tx_hash"),evidence.get("from_address"),evidence.get("to_address"),entry["amount_atomic"],"USDC",raw_hash,timestamp))
-        if entry["source_type"]=="VAULT_RELEASE": debit,credit="1000","1010"
-        else: debit,credit="1010","1000"
-        journal=post_journal(db,"PAYMENT_ENTRY",entry_id,"Confirmed internal capital transfer",debit,credit,entry["amount_atomic"],"USDC",timestamp)
-        db.execute("UPDATE payment_entries SET status='CONFIRMED',confirmed_at=? WHERE id=?",(timestamp,entry_id))
-        store.event(db,"INTERNAL_TRANSFER_CONFIRMED","payment_entry",entry_id,"Confirmed Circle transfer posted to the ledger",{"evidence_id":ev,"journal_id":journal},timestamp)
-    return {"id":entry_id,"status":"CONFIRMED","evidence_id":ev,"journal_id":journal}
-
-
 def listing(db: sqlite3.Connection, table: str, limit: int=25) -> list[dict]:
     allowed={"payment_entries","payment_evidence","journal_entries","events","sales_invoices","deals","spend_intents"}
     if table not in allowed: raise DomainError("METRON_INVALID_OPERATION")
@@ -424,8 +421,8 @@ def status(db: sqlite3.Connection) -> dict:
         (active["id"],today),
     ).fetchone()[0]
     reserved_today=db.execute(
-        "SELECT COALESCE(SUM(max_cost_atomic),0) FROM spend_intents WHERE goal_id=? AND substr(created_at,1,10)=? AND status IN ('APPROVED','SUBMITTED','EXECUTED','UNKNOWN')",
-        (active["id"],today),
+        "SELECT COALESCE(SUM(max_cost_atomic),0) FROM spend_intents WHERE goal_id=? AND ((status='APPROVED' AND substr(created_at,1,10)=?) OR (status IN ('SUBMITTED','EXECUTED','UNKNOWN') AND substr(COALESCE(executed_at,created_at),1,10)=?))",
+        (active["id"],today,today),
     ).fetchone()[0]
     return {
         "initialized":True,
@@ -433,7 +430,6 @@ def status(db: sqlite3.Connection) -> dict:
             "id":active["id"],"target":"%s USDC"%display(active["revenue_target_atomic"]),
             "revenue_generated":"%s USDC"%display(revenue),
             "operating_cash_journal_balance":"%s USDC"%display(balances.get("1000",0)),
-            "reserve_journal_balance":"%s USDC"%display(balances.get("1010",0)),
             "spend":"%s USDC"%display(spends),"net_contribution":"%s USDC"%display(revenue-spends),
             "return_on_spend_bps":(revenue*10000//spends if spends else None),
         },
@@ -445,7 +441,7 @@ def status(db: sqlite3.Connection) -> dict:
             "max_daily_spend":"%s USDC"%display(policy["max_daily_spend_atomic"]),
             "today_confirmed_spend":"%s USDC"%display(today_spent),
             "remaining_daily_authorization":"%s USDC"%display(max(0,policy["max_daily_spend_atomic"]-reserved_today)),
-            "reserve_floor":"%s USDC"%display(policy["reserve_floor_atomic"]),
+            "minimum_wallet_balance":"%s USDC"%display(policy["minimum_wallet_balance_atomic"]),
         },
         "counts":{
             "deals":db.execute("SELECT COUNT(*) FROM deals").fetchone()[0],

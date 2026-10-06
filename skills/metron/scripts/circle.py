@@ -260,20 +260,8 @@ def normalize_gateway_x402_transfer(record: dict,expected_id: str | None=None) -
     return {"provider":"CIRCLE","provider_ref":transfer_id,"status":status,"direction":"OUT","amount_atomic":_atomic_from_provider(amount,direct=True),"currency":"USDC","to_address":recipient,"from_address":sender,"tx_hash":tx_hash,"chain":chain,"raw_evidence_hash":hashlib.sha256(json.dumps(record,sort_keys=True,separators=(",",":"),default=str).encode()).hexdigest()}
 
 
-def contract_query(signature: str, contract: str, chain: str, *parameters: str) -> dict:
-    return call(["contract","query",signature,*parameters,"--contract",contract,"--chain",chain])
-
-
 def contract_addresses(category: str, chain: str) -> dict:
     return call(["contract","address",category,"--chain",chain])
-
-
-def wallet_execute(signature: str, parameters: list[str], contract: str, address: str, chain: str) -> dict:
-    return call(["wallet","execute",signature,*parameters,"--contract",contract,"--address",address,"--chain",chain],timeout=180)
-
-
-def wallet_transfer(destination: str, amount: str, address: str, chain: str) -> dict:
-    return call(["wallet","transfer",destination,"--amount",amount,"--address",address,"--chain",chain],timeout=180)
 
 
 def _first(record: dict, keys: tuple[str,...]):
@@ -402,54 +390,3 @@ def find_transaction(response: dict, provider_ref: str) -> dict:
         if isinstance(record,dict) and provider_ref in _transaction_references(record):
             return normalize_transaction(record)
     raise CircleError("METRON_PAYMENT_NOT_FOUND")
-
-
-def find_raw_transaction(response: dict, provider_ref: str) -> dict:
-    for record in records(response):
-        if isinstance(record,dict) and provider_ref in _transaction_references(record):
-            return record
-    raise CircleError("METRON_PAYMENT_NOT_FOUND")
-
-
-def submission_reference(response: dict) -> dict:
-    current=response
-    for key in ("data","transaction","result"):
-        if isinstance(current,dict) and isinstance(current.get(key),dict):
-            current=current[key]
-    if not isinstance(current,dict): raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
-    reference=_first(current,("txHash","tx_hash","transactionHash","hash","transactionId","id"))
-    return {"provider_ref":str(reference) if reference else None,"tx_hash":_first(current,("txHash","tx_hash","transactionHash","hash")),"state":str(_first(current,("state","status")) or "").lower()}
-
-
-def contract_value(response: dict):
-    if not isinstance(response,dict): raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
-    for key in ("result","value","returnValue","data"):
-        value=response.get(key)
-        if value is not None:
-            if isinstance(value,dict):
-                for nested in ("result","value","returnValue"):
-                    if value.get(nested) is not None: return value[nested]
-            return value
-    raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
-
-
-def query_scalar(signature: str, contract: str, chain: str, *parameters: str):
-    result=contract_value(contract_query(signature,contract,chain,*parameters))
-    if isinstance(result,(bool,int)): return result
-    if not isinstance(result,str): raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
-    if result.startswith("0x"):
-        raw=result[2:]
-        if not raw or any(char not in "0123456789abcdefABCDEF" for char in raw): raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
-        if signature=="paused()" or signature.startswith("usedActionIds("):
-            return int(raw,16)!=0
-        if signature in {"asset()","agentWallet()"}:
-            return "0x"+raw[-40:]
-        return int(raw,16)
-    if signature=="paused()" or signature.startswith("usedActionIds("):
-        if result.lower() in {"true","false"}: return result.lower()=="true"
-        raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
-    if signature in {"asset()","agentWallet()"}:
-        if len(result)!=42 or not result.startswith("0x"): raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
-        return result
-    if not result.isdecimal(): raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
-    return int(result)

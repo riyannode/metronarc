@@ -12,13 +12,13 @@ flowchart LR
   M -->|policy and records| S[(SQLite ~/.metron)]
   M -->|bounded service pay and history| C[Circle CLI / Agent Wallet]
   C -->|provider and chain evidence| M
+  M -->|optional reconciled provenance only| R[EconomicRegistry]
   M -->|read-only snapshot| D[Local dashboard]
-  V[MetronVault] -->|bounded reserve release| C
 ```
 
 ## Current verification
 
-Local validation includes Python compilation, isolated CLI initialization/status, manifest JSON parsing, manual payment-rail smoke verification, and 13 Foundry tests. The local marketplace plugin was installed with Codex CLI 0.160.0 and invoked in fresh sessions: status, creation of a 2,000 USDC goal with a 20 USDC budget, then status again from the same isolated SQLite state. A synthetic manual loop verified bounded spending, invoice payment reconciliation, balanced journals, and reinvested capital increasing the next spend budget. Circle CLI 1.1.4 matches the npm registry latest; its Windows Node 22.23.1 runtime now passes read-only testnet preflight. Circle Terms are never inferred from METRON use; see [Circle setup](docs/INSTALL.md#circle-setup) for the one-time explicit consent flow. One Arc Testnet wallet is authenticated, but its live USDC balance is 0 and its transaction history currently has 0 records. METRON's local operating-wallet binding is not configured, so incoming reconciliation still requires the user to configure the intended wallet and provide confirmed incoming USDC evidence. No compatible Arc Testnet marketplace provider was found, so paid x402 execution remains skipped. Authoritative live Gateway reconciliation, deployment, and desktop-app plugin verification remain unverified. The current data practices are documented in [the privacy policy](docs/PRIVACY.md) and [security boundaries](docs/SECURITY.md); publish a public policy URL before directory submission. Synthetic fixtures do not prove live-provider behavior; testnet and synthetic records must remain labeled as such.
+Circle Terms are never inferred from METRON use; see [Circle setup](docs/INSTALL.md#circle-setup) for the one-time explicit consent flow. Payment execution requires an authenticated Circle Agent Wallet and current Circle evidence; no live or testnet financial transaction is part of this repository's verification. Synthetic fixtures do not prove live-provider behavior; testnet and synthetic records must remain labeled as such.
 
 ## Local quickstart
 
@@ -38,7 +38,7 @@ Create a goal from a JSON file (amounts are exact USDC decimal strings):
     "operating_budget": "20",
     "max_spend_per_action": "0.10",
     "max_daily_spend": "2",
-    "reserve_floor": "10",
+    "minimum_wallet_balance": "10",
     "minimum_expected_roi_bps": 50000,
     "reinvestment_bps": 1000,
     "minimum_deal": "450"
@@ -50,7 +50,7 @@ Create a goal from a JSON file (amounts are exact USDC decimal strings):
 python3 -B skills/metron/scripts/run.py goal-create --input goal.json
 ```
 
-All runtime state is stored under `~/.metron/`, outside the plugin source/cache. The read-only dashboard is generated at `~/.metron/dashboard.html` and shows the active goal, recorded journal balances, spending and daily authorization limits, deal and approval counts, and latest records including open invoices.
+All runtime state is stored under `~/.metron/`, outside the plugin source/cache. The read-only dashboard is generated at `~/.metron/dashboard.html` and shows the active goal, recorded operating cash, spending and daily authorization limits, minimum Circle wallet balance, deal and approval counts, and latest records including open invoices. It does not show legacy account `1010` as a current balance.
 
 ## Plugin install
 
@@ -60,7 +60,13 @@ Add this repository's `.agents/plugins/marketplace.json` as a local marketplace 
 
 A Circle transaction is evidence. A Payment Entry is the business payment. A Journal Entry is its accounting consequence. METRON does not mark an invoice paid from a pasted hash or a submission response. Incoming USDC must be confirmed by Circle, match the open invoice and configured wallet, and be consumed only once.
 
-The included MetronVault only controls reserve tokens still held in the contract. Once funds are released to the Circle Agent Wallet, the vault cannot control those funds. Local policy is deterministic but runs on the local machine.
+Circle Agent Wallet is the sole operating-money account. Fund that wallet directly. METRON checks its live USDC balance before dispatch and requires the approved maximum cost plus `minimum_wallet_balance` to remain available. Local policy is deterministic but runs on the local machine.
+
+`EconomicRegistry` is a shared, non-custodial contract for optional immutable provenance records after local reconciliation. It cannot hold or transfer funds, execute payments, or establish business truth. Its canonical address is project infrastructure and is not a user setting; this repository does not deploy it or depend on it for payments.
+
+Circle's authoritative settlement record supplies `payment_evidence.tx_hash` when an actual Arc transaction hash is available. METRON preserves that hash as the settlement reference that can be checked in the Arc explorer; a provider/transfer ID remains `provider_ref` and is not promoted to a fabricated transaction hash. A future `revenueEvidenceHash` would be a versioned, domain-separated commitment identifying the authoritative external settlement evidence. It binds chain identity, operating/destination wallet, Circle provider reference, actual `tx_hash` when available, payer/from address, destination/to address, asset/currency, and exact atomic amount. It intentionally excludes local business identifiers such as spend, invoice, goal, deal, and journal IDs so one settlement has one stable evidence identity. The separate spend relationship is stored in EconomicRegistry; any future business-document anchoring must use a separate commitment or field. `revenueEvidenceHash` is not an Arc transaction hash or explorer reference and must never replace `tx_hash`. Registry recording is `INACTIVE / DEFERRED`; no application hash construction or registry writes are active.
+
+Spend `ALLOW` is automatically persisted as `APPROVED`; `ESCALATE` requires explicit persisted human approval, and `DENY` is terminal. Exceeding `max_spend_per_action` escalates. Exceeding `max_daily_spend`, available seed-plus-earned operating capital, or falling below `minimum_expected_roi_bps` denies, and human approval cannot bypass those hard limits. Below-minimum deals, deals marked `custom_or_legal_terms: true`, and deals with non-payer-wallet terms require pre-acceptance human approval. Customer acceptance always moves the deal to `PENDING_HUMAN`; a distinct final approval is required before invoice creation.
 
 ## Scope and limitations
 
@@ -68,7 +74,7 @@ The included MetronVault only controls reserve tokens still held in the contract
 - Paid-service execution supports `exact` and `GatewayWalletBatched` x402 on Arc Testnet. Gateway transfers are recorded only after Circle's authoritative transfer API reports `confirmed` or `completed`.
 - Circle CLI automatically prefers a Gateway-batched option when the seller and Gateway balance support it. METRON records the rail returned by Circle and reconciles it through the matching authoritative source; a rail mismatch remains `UNKNOWN` and is never retried automatically.
 - The default chain is `ARC-TESTNET`; change it only through an explicit local configuration step after verifying the target chain.
-- OTP login, testnet service payment, vault funding, deployment, and customer outreach require external account or user actions.
+- OTP login, wallet funding, testnet service payment, and customer outreach require external account or user actions. Users do not deploy or fund a METRON contract.
 - Testnet transaction evidence does not prove mainnet readiness or business truth.
 - METRON has no bundled email, hosted service, agent, scheduler, dashboard write controls, or arbitrary contract executor.
 
