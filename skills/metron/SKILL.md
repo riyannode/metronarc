@@ -7,6 +7,14 @@ Use the host's intelligence and existing connected apps. METRON owns determinist
 
 Run `python3 -B <plugin-root>/skills/metron/scripts/run.py --help` to inspect available operations. `status` safely initializes the local SQLite ledger on first use and reports an empty ledger; run it even when `~/.metron/metron.sqlite` does not exist yet. Send structured mutation input through a JSON file using `--input`; never interpolate user text into shell commands.
 
+### Dashboard
+
+When the user naturally asks to open or show the METRON dashboard, or view METRON operations, invoke the existing `dashboard` operation. The user does not need to know or type the Python command. Do not open the dashboard automatically when the plugin is installed or initialized.
+
+`dashboard` regenerates `~/.metron/dashboard.html` from the canonical local `~/.metron/metron.sqlite` state and opens it in the local default browser. `dashboard --no-open` regenerates the file without opening a browser. The HTML is a static local snapshot, not a live hosted UI: it does not poll Circle or show a live Circle wallet balance. Circle and other external activity appears only after authoritative METRON reconciliation has persisted it to SQLite.
+
+After a business-state command returns successfully, following its persistence logic (goal creation; spend proposal, approval, execution, or reconciliation; deal mutation; or invoice mutation), the runtime silently regenerates the snapshot if `~/.metron/dashboard.html` already exists. This refresh does not open a browser or make Circle reads. Commands that fail with an error do not enter this path. If an authoritative operation successfully persists a `FAILED` or `UNKNOWN` result, the refreshed dashboard retains that exact status; generation never upgrades it to success.
+
 Rules:
 
 1. Create and evaluate a Spend Intent before every paid economic action. Search, inspect, or estimate a Circle service before proposing payment. Copy the inspected HTTP method, `exact` or `GatewayWalletBatched` payment scheme, accepted Arc Testnet chain, and seller wallet into `http_method`, `payment_scheme`, `accepted_chains`, and `payee_address`; include the exact request body in the proposal. Immediately before dispatch, METRON re-estimates and requires the same scheme, seller, and chain within the approved maximum, then reads the Circle wallet balance and verifies that `approved_max_cost + minimum_wallet_balance` remains available.

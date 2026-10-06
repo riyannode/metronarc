@@ -4,8 +4,12 @@ import argparse
 import hashlib
 import html
 import json
+import os
+import re
 import sqlite3
+import subprocess
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 
 import circle
@@ -13,6 +17,13 @@ import finance
 import store
 
 DASHBOARD_TEMPLATE = Path(__file__).resolve().parents[3]/"dashboard"/"index.html"
+ARC_TESTNET_TX_URL = "https://explorer.testnet.arc.io/tx/"
+EVM_TX_HASH = re.compile(r"0x[0-9a-fA-F]{64}\Z")
+DASHBOARD_REFRESH_OPERATIONS = frozenset({
+    "goal-create", "spend-propose", "spend-approve", "spend-execute", "payment-reconcile",
+    "deal-create", "deal-update", "deal-accept", "deal-approve", "deal-reject",
+    "invoice-create", "invoice-post",
+})
 
 
 def parser() -> argparse.ArgumentParser:
@@ -54,37 +65,169 @@ def build_dashboard(db) -> str:
     status=finance.status(db)
     tables={name:finance.listing(db,name,10) for name in ("spend_intents","payment_entries","payment_evidence","journal_entries","deals","events")}
     tables["sales_invoices"]=[dict(row) for row in db.execute("SELECT * FROM sales_invoices WHERE status='OPEN' ORDER BY rowid DESC LIMIT 10").fetchall()]
+    tables["payment_evidence"]=[dict(row) for row in db.execute(
+        "SELECT e.*,p.status AS payment_status,p.direction,p.amount_atomic AS payment_amount_atomic "
+        "FROM payment_evidence e JOIN payment_entries p ON p.id=e.payment_entry_id "
+        "ORDER BY e.rowid DESC LIMIT 10"
+    ).fetchall()]
     for journal in tables["journal_entries"]:
-        lines=db.execute("SELECT account_code,debit_atomic,credit_atomic,currency FROM journal_lines WHERE journal_entry_id=?",(journal["id"],)).fetchall()
-        journal["lines"]="; ".join("%s DR %s CR %s %s"%(line["account_code"],line["debit_atomic"],line["credit_atomic"],line["currency"]) for line in lines)
-    def table(title: str,rows: list[dict],columns: list[str] | None=None) -> str:
-        if not rows: return f"<section><h2>{html.escape(title)}</h2><p>No records.</p></section>"
-        keys=columns or list(rows[0])[:7]
-        head="".join(f"<th>{html.escape(key)}</th>" for key in keys)
-        body="".join("<tr>"+"".join(f"<td>{html.escape(str(row.get(key, '')))}</td>" for key in keys)+"</tr>" for row in rows)
-        return f"<section><h2>{html.escape(title)}</h2><div class='scroll'><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div></section>"
-    payload=html.escape(json.dumps(status,sort_keys=True))
+        journal["lines"]=db.execute("SELECT account_code,debit_atomic,credit_atomic,currency FROM journal_lines WHERE journal_entry_id=?",(journal["id"],)).fetchall()
+
+    def money(value, currency="USDC") -> str:
+        if value is None or value == "": return "<span class='muted'>—</span>"
+        if isinstance(value, int):
+            amount=finance.display(value)
+            exact=f"{value:,} atomic units"
+            return f"<span class='money' title='{html.escape(exact,quote=True)}'>{html.escape(amount)} <span class='currency'>{html.escape(currency)}</span></span>"
+        return html.escape(str(value))
+
+    def state(value) -> str:
+        label=str(value or "—")
+        known={"APPROVED","ESCALATED","SUBMITTED","EXECUTED","UNKNOWN","CONFIRMED","RECONCILED","PENDING_HUMAN","HUMAN_APPROVED","HUMAN_REJECTED","PAID","OPEN","POSTED","PROPOSED","DENIED","FAILED","CREATED","PROSPECTING","NEGOTIATING","CUSTOMER_ACCEPTED","INVOICED","CLOSED_WON","CLOSED_LOST","DRAFT","VOID","PROPOSED","ALLOW","ESCALATE","DENY"}
+        css=label.lower().replace("_","-") if label in known else "neutral"
+        return f"<span class='badge badge--{css}'>{html.escape(label)}</span>"
+
+    def tx_hash(value, row) -> str:
+        raw=str(value or "")
+        if not raw: return "<span class='muted'>—</span>"
+        escaped=html.escape(raw,quote=True)
+        if EVM_TX_HASH.fullmatch(raw) and str(row.get("chain") or "").upper()=="ARC-TESTNET":
+            short=f"{raw[:6]}…{raw[-4:]}"
+            return f"<a class='tx-link mono' href='{ARC_TESTNET_TX_URL}{raw}' target='_blank' rel='noopener noreferrer' title='{escaped}' aria-label='View Arc Testnet transaction {escaped}'>{short} <span aria-hidden='true'>↗</span></a>"
+        return f"<span class='mono clipped' title='{escaped}'>{escaped}</span>"
+
+    def cell(row, key, kind) -> str:
+        value=row.get(key)
+        if kind=="money": return money(value,row.get("currency") or "USDC")
+        if kind=="state": return state(value)
+        if kind=="tx": return tx_hash(value,row)
+        if kind=="bps":
+            if value is None: return "<span class='muted'>—</span>"
+            return f"{int(value)//100}.{int(value)%100:02d}%"
+        if kind=="direction":
+            text=str(value or "—")
+            return f"<span class='direction'>{html.escape(text)}</span>"
+        if kind=="lines":
+            lines=row.get("lines") or []
+            return "<div class='journal-lines'>"+"".join(
+                f"<span><b>{html.escape(str(line['account_code']))}</b> DR {money(line['debit_atomic'],line['currency'])} · CR {money(line['credit_atomic'],line['currency'])}</span>" for line in lines
+            )+"</div>"
+        if kind=="summary":
+            text=str(value or "—")
+            return f"<span class='clipped summary' title='{html.escape(text,quote=True)}'>{html.escape(text)}</span>"
+        if kind=="mono":
+            text=str(value or "—")
+            return f"<span class='mono clipped' title='{html.escape(text,quote=True)}'>{html.escape(text)}</span>"
+        text=str(value or "—")
+        return f"<span title='{html.escape(text,quote=True)}'>{html.escape(text)}</span>"
+
+    def table(title: str, rows: list[dict], columns: list[tuple[str,str,str]], empty: str, anchor: str) -> str:
+        heading=f"<div class='section-heading'><div><p class='eyebrow'>OPERATIONAL RECORDS</p><h2>{html.escape(title)}</h2></div><span class='row-count'>{len(rows)} shown</span></div>"
+        if not rows:
+            return f"<section class='panel' id='{anchor}'>{heading}<p class='empty-state'>{html.escape(empty)}</p></section>"
+        head="".join(f"<th scope='col'>{html.escape(label)}</th>" for label,_,_ in columns)
+        body="".join("<tr>"+"".join(f"<td>{cell(row,key,kind)}</td>" for _,key,kind in columns)+"</tr>" for row in rows)
+        return f"<section class='panel' id='{anchor}'>{heading}<div class='scroll'><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div></section>"
+
+    payload=html.escape(json.dumps(status,sort_keys=True),quote=True)
     goal=status.get("goal") or {}
     policy=status.get("policy") or {}
     counts=status.get("counts") or {}
-    metrics=[
+    primary=[
         ("Revenue goal",goal.get("target")),("Revenue generated",goal.get("revenue_generated")),
-        ("Operating cash",goal.get("operating_cash_journal_balance")),
-        ("Total spend",goal.get("spend")),("Net contribution",goal.get("net_contribution")),
-        ("Return on spend",None if goal.get("return_on_spend_bps") is None else f"{goal['return_on_spend_bps']//100}.{goal['return_on_spend_bps']%100:02d}%"),
-        ("Deals",counts.get("deals",0)),("Pending approval",counts.get("pending_approvals",0)),("Open invoices",counts.get("open_invoices",0)),
-        ("Seed operating budget",policy.get("seed_operating_budget")),("Reinvested operating capital",policy.get("earned_operating_capital")),
-        ("Operating budget",policy.get("operating_budget")),("Maximum per action",policy.get("max_spend_per_action")),
-        ("Maximum daily spend",policy.get("max_daily_spend")),("Confirmed spend today",policy.get("today_confirmed_spend")),
-        ("Daily authorization remaining",policy.get("remaining_daily_authorization")),("Minimum wallet balance",policy.get("minimum_wallet_balance")),
+        ("Operating budget",policy.get("operating_budget")),("Earned operating capital",policy.get("earned_operating_capital")),
+        ("Net contribution",goal.get("net_contribution")),
     ]
-    cards="".join(f"<article><small>{html.escape(label)}</small><strong>{html.escape(str(value if value is not None else '—'))}</strong></article>" for label,value in metrics)
+    bps=goal.get("return_on_spend_bps")
+    secondary=[
+        ("Total spend",goal.get("spend")),("Return on spend",None if bps is None else f"{bps//100}.{bps%100:02d}%"),
+        ("Maximum per action",policy.get("max_spend_per_action")),("Maximum daily spend",policy.get("max_daily_spend")),
+        ("Daily authorization remaining",policy.get("remaining_daily_authorization")),("Minimum wallet balance",policy.get("minimum_wallet_balance")),
+        ("Pending approvals",counts.get("pending_approvals",0)),("Open invoices",counts.get("open_invoices",0)),
+    ]
+    def metric(label,value,primary_metric=False):
+        return f"<article class='metric{' metric--primary' if primary_metric else ''}'><span>{html.escape(label)}</span><strong>{html.escape(str(value if value is not None else '—'))}</strong></article>"
+    primary_html="".join(metric(label,value,True) for label,value in primary)
+    secondary_html="".join(metric(label,value) for label,value in secondary)
+    goal_state="Active revenue goal" if goal else "No active revenue goal"
+    generated=datetime.now().astimezone().isoformat(timespec="seconds")
+    chain_label="ARC TESTNET" if chain().upper()=="ARC-TESTNET" else chain().upper()
     sections=[]
-    for name,rows in tables.items():
-        columns=["id","payment_entry_id","provider_ref","chain","tx_hash","from_address","to_address","amount_atomic","currency"] if name=="payment_evidence" else None
-        sections.append(table(name.replace("_"," ").title(),rows,columns))
+    sections.append("<section class='capital-layout' id='capital'><div class='panel capital-panel'><div class='section-heading'><div><p class='eyebrow'>CAPITAL &amp; POLICY</p><h2>Operating authority</h2></div></div><div class='capital-facts'>"+
+        f"<div><span>Seed operating budget</span><strong>{html.escape(str(policy.get('seed_operating_budget','—')))}</strong></div><div><span>Earned operating capital</span><strong>{html.escape(str(policy.get('earned_operating_capital','—')))}</strong></div><div><span>Confirmed spend today</span><strong>{html.escape(str(policy.get('today_confirmed_spend','—')))}</strong></div>"+
+        "</div><p class='note'>Recorded journal balances are local accounting values, not a live Circle Agent Wallet balance.</p></div><div class='secondary-grid'>"+secondary_html+"</div></section>")
+    sections.append(table("Spend intents",tables["spend_intents"],[
+        ("Intent","id","mono"),("Status","status","state"),("Policy","policy_result","state"),("Purpose","purpose","summary"),
+        ("Max cost","max_cost_atomic","money"),("Expected ROI","expected_roi_bps","bps"),("Created","created_at","text"),
+    ],"No spend intents recorded yet.","spend-intents"))
+    sections.append(table("Payments",tables["payment_entries"],[
+        ("Payment","id","mono"),("Status","status","state"),("Direction","direction","direction"),("Amount","amount_atomic","money"),
+        ("Provider","provider","text"),("Provider ref","provider_payment_id","mono"),("Confirmed","confirmed_at","text"),
+    ],"No payments recorded yet.","payments"))
+    sections.append(table("Payment evidence",tables["payment_evidence"],[
+        ("Status","payment_status","state"),("Direction","direction","direction"),("Amount","amount_atomic","money"),
+        ("Chain","chain","text"),("Provider","provider","text"),("Provider ref","provider_ref","mono"),
+        ("TX hash","tx_hash","tx"),("From","from_address","mono"),("To","to_address","mono"),
+    ],"No payment evidence recorded yet.","evidence"))
+    sections.append(table("Deals & human approvals",tables["deals"],[
+        ("Deal","id","mono"),("Status","status","state"),("Amount","amount_atomic","money"),
+        ("Counterparty","counterparty_id","mono"),("Created","created_at","text"),
+    ],"No deals or human approvals recorded yet.","deals"))
+    sections.append(table("Open invoices",tables["sales_invoices"],[
+        ("Invoice","id","mono"),("Status","status","state"),("Amount","amount_atomic","money"),
+        ("Deal","deal_id","mono"),("Issued","issued_at","text"),("Due","due_at","text"),
+    ],"No open invoices.","invoices"))
+    sections.append(table("Journal",tables["journal_entries"],[
+        ("Entry","id","mono"),("Status","status","state"),("Source","source_type","text"),
+        ("Description","description","summary"),("Lines","lines","lines"),("Posted","posted_at","text"),
+    ],"No journal entries recorded yet.","journal"))
+    sections.append(table("Activity & events",tables["events"],[
+        ("Event","event_type","state"),("Entity","entity_type","text"),("ID","entity_id","mono"),
+        ("Summary","summary","summary"),("Recorded","created_at","text"),
+    ],"No activity recorded yet.","activity"))
     template=DASHBOARD_TEMPLATE.read_text(encoding="utf-8")
-    return template.replace("<!-- METRON_METRICS -->",cards).replace("<!-- METRON_SECTIONS -->","".join(sections)).replace("<!-- METRON_STATUS -->",payload)
+    return (template.replace("<!-- METRON_PRIMARY_METRICS -->",primary_html)
+        .replace("<!-- METRON_SECONDARY_METRICS -->",secondary_html)
+        .replace("<!-- METRON_SECTIONS -->","".join(sections))
+        .replace("<!-- METRON_GOAL_STATE -->",html.escape(goal_state))
+        .replace("<!-- METRON_GENERATED -->",html.escape(generated))
+        .replace("<!-- METRON_CHAIN -->",html.escape(chain_label))
+        .replace("<!-- METRON_STATUS -->",payload))
+
+
+def refresh_existing_dashboard() -> None:
+    path=store.STATE_HOME/"dashboard.html"
+    if not path.is_file(): return
+    try:
+        with store.connect() as db:
+            snapshot=build_dashboard(db)
+        path.write_text(snapshot,encoding="utf-8")
+    except Exception:
+        # A snapshot refresh must not change the result of a committed business operation.
+        pass
+
+
+def open_dashboard(path: Path) -> bool:
+    if os.environ.get("WSL_INTEROP"):
+        try:
+            windows_path=subprocess.run(["wslpath","-w",str(path)],check=True,capture_output=True,text=True,timeout=10).stdout.strip()
+            file_url="file:"+windows_path.replace("\\","/")
+            powershell=(
+                "$uri=[Console]::In.ReadToEnd().Trim(); "
+                "$id=(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https\\UserChoice').ProgId; "
+                "$cmd=(Get-ItemProperty \"Registry::HKEY_CLASSES_ROOT\\$id\\shell\\open\\command\").'(default)'; "
+                "$exe=[regex]::Match($cmd,'^\\\"([^\\\"]+)\\\"').Groups[1].Value; "
+                "if (-not $exe) { throw 'Default browser command is unavailable' }; "
+                "Start-Process -FilePath $exe -ArgumentList @($uri)"
+            )
+            subprocess.run(
+                ["powershell.exe","-NoProfile","-Command",powershell],
+                input=file_url,check=True,capture_output=True,text=True,timeout=10,
+            )
+            return True
+        except (OSError,subprocess.SubprocessError):
+            pass
+    return bool(webbrowser.open(path.as_uri()))
 
 
 def execute(args: argparse.Namespace) -> object:
@@ -230,14 +373,17 @@ def execute(args: argparse.Namespace) -> object:
         if operation=="dashboard":
             path=store.STATE_HOME/"dashboard.html"
             path.write_text(build_dashboard(db),encoding="utf-8")
-            if not args.no_open: webbrowser.open(path.as_uri())
-            return {"path":str(path),"opened":not args.no_open}
+            opened=open_dashboard(path) if not args.no_open else False
+            return {"path":str(path),"opened":bool(opened)}
     raise finance.DomainError("METRON_INVALID_OPERATION")
 
 
 def main() -> int:
     try:
-        result=execute(parser().parse_args())
+        args=parser().parse_args()
+        result=execute(args)
+        if args.operation in DASHBOARD_REFRESH_OPERATIONS:
+            refresh_existing_dashboard()
         print(json.dumps({"ok":True,"data":result},separators=(",",":"),default=str))
         return 0
     except finance.DomainError as exc:
