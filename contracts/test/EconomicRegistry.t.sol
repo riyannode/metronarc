@@ -75,14 +75,27 @@ contract EconomicRegistryTest is Test {
         bytes32 revenueHash = keccak256("revenue-1");
         vm.prank(wallet);
         registry.recordRevenue(spendId, revenueHash, 5_000_000, 500_000);
-        (address operatingWallet, bytes32 storedGoal, bytes32 storedIntent, bytes32 storedPayment, uint256 amount,, bool linked) = registry.spendRecords(wallet, spendId);
+        (
+            address operatingWallet,
+            bytes32 storedGoal,
+            bytes32 storedIntent,
+            bytes32 storedPayment,
+            uint256 amount,,
+            bool linked
+        ) = registry.spendRecords(wallet, spendId);
         assertEq(operatingWallet, wallet);
         assertEq(storedGoal, goalHash);
         assertEq(storedIntent, intentHash);
         assertEq(storedPayment, paymentHash);
         assertEq(amount, 2_000_000);
         assertTrue(linked);
-        (bytes32 storedSpendId, bytes32 storedRevenue, uint256 revenueAmount, uint256 earnedCapital, uint256 recordedAt) = registry.revenueRecords(wallet, spendId);
+        (
+            bytes32 storedSpendId,
+            bytes32 storedRevenue,
+            uint256 revenueAmount,
+            uint256 earnedCapital,
+            uint256 recordedAt
+        ) = registry.revenueRecords(wallet, spendId);
         assertEq(storedSpendId, spendId);
         assertEq(storedRevenue, revenueHash);
         assertEq(revenueAmount, 5_000_000);
@@ -126,7 +139,8 @@ contract EconomicRegistryTest is Test {
         assertFalse(accepted);
         (accepted,) = address(registry).call(abi.encodeWithSignature("transfer(address,uint256)", wallet, 1));
         assertFalse(accepted);
-        (accepted,) = address(registry).call(abi.encodeWithSignature("transferFrom(address,address,uint256)", wallet, otherWallet, 1));
+        (accepted,) = address(registry)
+            .call(abi.encodeWithSignature("transferFrom(address,address,uint256)", wallet, otherWallet, 1));
         assertFalse(accepted);
     }
 }

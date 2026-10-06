@@ -58,26 +58,22 @@ contract EconomicRegistry {
         uint256 amount
     ) external {
         if (
-            msg.sender == address(0) || spendId == bytes32(0) || goalHash == bytes32(0)
-                || spendIntentHash == bytes32(0) || paymentEvidenceHash == bytes32(0) || amount == 0
+            msg.sender == address(0) || spendId == bytes32(0) || goalHash == bytes32(0) || spendIntentHash == bytes32(0)
+                || paymentEvidenceHash == bytes32(0) || amount == 0
         ) revert InvalidSpendRecord();
         if (spendRecords[msg.sender][spendId].operatingWallet != address(0)) {
             revert SpendAlreadyRecorded(msg.sender, spendId);
         }
 
         uint256 timestamp = block.timestamp;
-        spendRecords[msg.sender][spendId] = SpendRecord(
-            msg.sender, goalHash, spendIntentHash, paymentEvidenceHash, amount, timestamp, false
-        );
+        spendRecords[msg.sender][spendId] =
+            SpendRecord(msg.sender, goalHash, spendIntentHash, paymentEvidenceHash, amount, timestamp, false);
         emit SpendRecorded(msg.sender, spendId, goalHash, spendIntentHash, paymentEvidenceHash, amount, timestamp);
     }
 
-    function recordRevenue(
-        bytes32 spendId,
-        bytes32 revenueEvidenceHash,
-        uint256 revenueAmount,
-        uint256 earnedCapital
-    ) external {
+    function recordRevenue(bytes32 spendId, bytes32 revenueEvidenceHash, uint256 revenueAmount, uint256 earnedCapital)
+        external
+    {
         SpendRecord storage spend = spendRecords[msg.sender][spendId];
         if (spend.operatingWallet == address(0)) revert SpendNotFound(msg.sender, spendId);
         if (spend.revenueLinked) revert RevenueAlreadyLinked(msg.sender, spendId);
@@ -89,9 +85,8 @@ contract EconomicRegistry {
         uint256 timestamp = block.timestamp;
         usedRevenueEvidence[revenueEvidenceHash] = true;
         spend.revenueLinked = true;
-        revenueRecords[msg.sender][spendId] = RevenueRecord(
-            spendId, revenueEvidenceHash, revenueAmount, earnedCapital, timestamp
-        );
+        revenueRecords[msg.sender][spendId] =
+            RevenueRecord(spendId, revenueEvidenceHash, revenueAmount, earnedCapital, timestamp);
         emit RevenueRecorded(msg.sender, spendId, revenueEvidenceHash, revenueAmount, earnedCapital, timestamp);
     }
 }
