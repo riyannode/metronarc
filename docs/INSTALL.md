@@ -8,12 +8,22 @@
 
 ## Use the local plugin
 
-1. Add the repository `.agents/plugins/marketplace.json` as a local marketplace in a supported Codex client.
-2. Install/enable METRON and start a fresh session.
-3. Ask `Use METRON. Show status.`
-4. Initialize with `python3 -B skills/metron/scripts/run.py init` if state does not exist.
-5. Configure `chain` and `operating_wallet`, authenticate the Circle Agent Wallet through Circle CLI, and fund that wallet directly.
-6. Create a goal from a JSON file with `goal-create --input path.json`.
+### Current manual path
+
+1. In ChatGPT desktop, open Plugins and choose Add marketplace from a repository.
+2. Enter `https://github.com/riyannode/metronarc` and select ref `master`.
+3. Select the METRON marketplace and install/enable METRON.
+4. Start a fresh chat and ask `Set up METRON`.
+
+### Future npm bootstrap
+
+Bootstrap CLI prepared for npm publication. After the package is published, run `npx @riyannode/metron`. It registers the GitHub marketplace and prints the manual installation steps above; it does not silently install or enable the plugin. This command is not available until npm publication.
+
+After installing the plugin:
+1. Ask `Use METRON. Show status.`
+2. Initialize with `python3 -B skills/metron/scripts/run.py init` if state does not exist.
+3. Configure `chain` and `operating_wallet`, authenticate the Circle Agent Wallet through Circle CLI, and fund that wallet directly.
+4. Create a goal from a JSON file with `goal-create --input path.json`.
 
 METRON does not require users to deploy or fund a contract. The optional EconomicRegistry address is trusted project configuration and is inactive until a supported deployment is explicitly configured by METRON.
 

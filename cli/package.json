@@ -1,0 +1,27 @@
+{
+  "name": "@riyannode/metron",
+  "version": "0.1.0",
+  "description": "Bootstrap CLI for discovering and installing the METRON plugin",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "metron": "./bin/metron.js"
+  },
+  "files": [
+    "README.md",
+    "LICENSE",
+    "bin/metron.js"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/riyannode/metronarc.git",
+    "directory": "cli"
+  },
+  "homepage": "https://github.com/riyannode/metronarc#readme",
+  "bugs": {
+    "url": "https://github.com/riyannode/metronarc/issues"
+  }
+}
