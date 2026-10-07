@@ -159,9 +159,9 @@ async function doctor() {
 
   const python = pythonStatus();
   if (!python) {
-    console.log("! Python not found; Python 3.11 or later is recommended");
+    console.log("! Python not found; Python 3.11 or later is required by the METRON runtime");
   } else if (python.version.major < 3 || (python.version.major === 3 && python.version.minor < 11)) {
-    console.log(`! Python ${python.version.major}.${python.version.minor}; Python 3.11 or later is recommended`);
+    console.log(`! Python ${python.version.major}.${python.version.minor}; Python 3.11 or later is required by the METRON runtime`);
   } else {
     console.log(`✓ Python ${python.version.major}.${python.version.minor}`);
   }
@@ -202,9 +202,9 @@ function verifyTarget(marketplaces) {
 function warnOptionalPrerequisites() {
   const python = pythonStatus();
   if (!python) {
-    console.warn("! Python 3.11 or later not found; it is required by METRON runtime features.");
+    console.warn("! Python not found; Python 3.11 or later is required by the METRON runtime.");
   } else if (python.version.major < 3 || (python.version.major === 3 && python.version.minor < 11)) {
-    console.warn(`! Python ${python.version.major}.${python.version.minor} found; METRON requires Python 3.11 or later.`);
+    console.warn(`! Python ${python.version.major}.${python.version.minor} found; Python 3.11 or later is required by the METRON runtime.`);
   }
   if (!findExecutable("circle")) {
     console.warn("! Circle CLI not found; it is required before financial actions.");
