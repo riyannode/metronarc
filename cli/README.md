@@ -1,20 +1,21 @@
 # METRON bootstrap CLI
 
-This package is a small setup helper for the METRON plugin. The canonical plugin, skills, and runtime remain in [riyannode/metronarc](https://github.com/riyannode/metronarc).
+This package is the bootstrap helper for the METRON plugin. The canonical plugin, skills, runtime, and financial logic remain in [riyannode/metronarc](https://github.com/riyannode/metronarc).
 
-The package is prepared for npm publication and is not published yet. After publication, the intended command is:
+Run:
 
 ```sh
 npx @riyannode/metron
 ```
 
-The command registers the `riyannode/metronarc` GitHub marketplace at `master` and prints the steps to install METRON in ChatGPT desktop. It does not install or enable the plugin automatically.
+Available commands:
 
-## Commands
+- `metron`
+- `metron setup`
+- `metron doctor`
+- `metron --help`
+- `metron --version`
 
-- `metron` or `metron setup` checks prerequisites, registers the marketplace if needed, verifies it, and prints next steps.
-- `metron doctor` reports local prerequisites and marketplace status without changing files or configuration.
-- `metron --help` shows command usage.
-- `metron --version` shows the package version.
+The setup command registers the METRON GitHub marketplace at `master` and prints the remaining ChatGPT desktop plugin-installation steps. It does not silently install or enable the ChatGPT plugin.
 
-Circle CLI detection is informational. This bootstrap never logs in to Circle, accepts Terms, accesses wallets, or performs financial actions.
+This bootstrap does not log in to Circle, accept Circle Terms, access wallets, execute payments, or initialize financial state.
