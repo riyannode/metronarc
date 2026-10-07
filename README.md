@@ -54,7 +54,15 @@ All runtime state is stored under `~/.metron/`, outside the plugin source/cache.
 
 ## Plugin install
 
-Add this repository's `.agents/plugins/marketplace.json` as a local marketplace in a supported Codex client, install METRON, then start a fresh session and ask “Use METRON. Show status.” The local marketplace install and persisted state were verified in three fresh Codex CLI sessions; desktop-app plugin UI verification remains open.
+### Current manual path
+
+In ChatGPT desktop, open Plugins, add a marketplace from the repository `https://github.com/riyannode/metronarc` at ref `master`, install METRON, then start a fresh chat and ask “Set up METRON.”
+
+### Future npm bootstrap
+
+Bootstrap CLI prepared for npm publication. After the package is published, run `npx @riyannode/metron`. The npm package only registers the GitHub marketplace and prints setup steps; the canonical plugin remains in this repository. This command is not available until npm publication.
+
+The local marketplace install and persisted state were verified in three fresh Codex CLI sessions; desktop-app plugin UI verification remains open.
 
 ## Accounting semantics
 

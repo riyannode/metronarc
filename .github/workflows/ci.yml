@@ -11,6 +11,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validate bootstrap package
+        run: |
+          node --check cli/bin/metron.js
+          cd cli
+          npm pack --dry-run --json | node -e 'const assert = require("node:assert/strict"); const data = JSON.parse(require("node:fs").readFileSync(0, "utf8")); const files = data[0].files.map(file => file.path).sort(); assert.deepEqual(files, ["LICENSE", "README.md", "bin/metron.js", "package.json"]); console.log(files.join("\n"));'
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
