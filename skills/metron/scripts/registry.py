@@ -296,7 +296,7 @@ def _sync_one(db: sqlite3.Connection, record: sqlite3.Row) -> dict:
                     return {"id": record["id"], "status": "FAILED", "error_code": "METRON_REGISTRY_RECONCILIATION_MISMATCH"}
                 _mark(db, record["id"], "CONFIRMED", confirmed_at=finance.now())
                 return {"id": record["id"], "status": "CONFIRMED", "tx_hash": record["tx_hash"], "revenue_count": revenue_count}
-            if record["provider_tx_ref"]:
+            if record["provider_tx_ref"] or record["tx_hash"]:
                 _mark(db, record["id"], "UNKNOWN", error_code="METRON_REGISTRY_WRITE_PENDING_READBACK")
                 return {"id": record["id"], "status": "UNKNOWN", "error_code": "METRON_REGISTRY_WRITE_PENDING_READBACK"}
             execute = lambda: circle.registry_record_spend(
@@ -315,6 +315,9 @@ def _sync_one(db: sqlite3.Connection, record: sqlite3.Row) -> dict:
             if used:
                 _mark(db, record["id"], "FAILED", error_code="METRON_REGISTRY_RECONCILIATION_MISMATCH")
                 return {"id": record["id"], "status": "FAILED", "error_code": "METRON_REGISTRY_RECONCILIATION_MISMATCH"}
+            if record["provider_tx_ref"] or record["tx_hash"]:
+                _mark(db, record["id"], "UNKNOWN", error_code="METRON_REGISTRY_WRITE_PENDING_READBACK")
+                return {"id": record["id"], "status": "UNKNOWN", "error_code": "METRON_REGISTRY_WRITE_PENDING_READBACK"}
             spend_row = db.execute(
                 "SELECT * FROM registry_records WHERE registry_version='V2' AND record_type='SPEND' "
                 "AND operating_wallet=? AND spend_id=? AND contract_address=?",
@@ -325,9 +328,6 @@ def _sync_one(db: sqlite3.Connection, record: sqlite3.Row) -> dict:
             spend_current, spend_exists, _ = _spend_state(spend_row)
             if not spend_exists or spend_current != _expected_spend(spend_row):
                 return {"id": record["id"], "status": record["status"], "error_code": "METRON_REGISTRY_ORIGIN_SPEND_PENDING"}
-            if record["provider_tx_ref"]:
-                _mark(db, record["id"], "UNKNOWN", error_code="METRON_REGISTRY_WRITE_PENDING_READBACK")
-                return {"id": record["id"], "status": "UNKNOWN", "error_code": "METRON_REGISTRY_WRITE_PENDING_READBACK"}
             execute = lambda: circle.registry_record_revenue(
                 record["contract_address"], record["operating_wallet"], record["chain"], record["spend_id"],
                 record["revenue_evidence_hash"], record["amount_atomic"], record["earned_capital_atomic"],
@@ -373,10 +373,9 @@ def sync(db: sqlite3.Connection, record_id: str | None = None) -> dict:
             raise finance.DomainError("METRON_REGISTRY_RECORD_NOT_FOUND")
         if requested["registry_version"] == "V1":
             return {"records": [{"id": record_id, "registry_version": "V1", "status": "DEPRECATED"}]}
-        rows = db.execute(
-            "SELECT * FROM registry_records WHERE id=? AND registry_version='V2' "
-            "AND status IN ('PENDING','SUBMITTED','UNKNOWN')", (record_id,)
-        ).fetchall()
+        if requested["status"] not in {"PENDING", "SUBMITTED", "UNKNOWN"}:
+            return {"records": [dict(requested)]}
+        rows = [requested]
     else:
         contract = CANONICAL_REGISTRIES.get("ARC-TESTNET")
         if not contract:
@@ -386,8 +385,6 @@ def sync(db: sqlite3.Connection, record_id: str | None = None) -> dict:
             "AND status IN ('PENDING','SUBMITTED','UNKNOWN') "
             "ORDER BY CASE record_type WHEN 'SPEND' THEN 0 ELSE 1 END,created_at", (contract,)
         ).fetchall()
-        if record_id and not rows:
-            return {"records": [dict(requested)]}
     return {"records": [_sync_one(db, row) for row in rows]}
 
 
