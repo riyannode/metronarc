@@ -126,9 +126,6 @@ def build_dashboard(db) -> str:
         if kind=="money": return money(value,row.get("currency") or "USDC")
         if kind=="state": return state(value)
         if kind=="tx": return tx_hash(value,row)
-        if kind=="bps":
-            if value is None: return "<span class='muted'>—</span>"
-            return f"{int(value)//100}.{int(value)%100:02d}%"
         if kind=="direction":
             text=str(value or "—")
             return f"<span class='direction'>{html.escape(text)}</span>"
@@ -159,13 +156,13 @@ def build_dashboard(db) -> str:
     policy=status.get("policy") or {}
     counts=status.get("counts") or {}
     primary=[
-        ("Revenue goal",goal.get("target")),("Revenue generated",goal.get("revenue_generated")),
+        ("Revenue goal",goal.get("target")),("Revenue collected",goal.get("revenue_collected")),
         ("Operating budget",policy.get("operating_budget")),("Earned operating capital",policy.get("earned_operating_capital")),
         ("Net contribution",goal.get("net_contribution")),
     ]
-    bps=goal.get("return_on_spend_bps")
+    bps=goal.get("realized_roi_bps")
     secondary=[
-        ("Total spend",goal.get("spend")),("Return on spend",None if bps is None else f"{bps//100}.{bps%100:02d}%"),
+        ("Total confirmed spend",goal.get("confirmed_spend")),("Realized ROI",None if bps is None else f"{'-' if bps < 0 else ''}{abs(bps)//100}.{abs(bps)%100:02d}%"),
         ("Maximum per action",policy.get("max_spend_per_action")),("Maximum daily spend",policy.get("max_daily_spend")),
         ("Daily authorization remaining",policy.get("remaining_daily_authorization")),("Minimum wallet balance",policy.get("minimum_wallet_balance")),
         ("Pending approvals",counts.get("pending_approvals",0)),("Open invoices",counts.get("open_invoices",0)),
@@ -183,7 +180,7 @@ def build_dashboard(db) -> str:
         "</div><p class='note'>Recorded journal balances are local accounting values, not a live Circle Agent Wallet balance.</p></div><div class='secondary-grid'>"+secondary_html+"</div></section>")
     sections.append(table("Spend intents",tables["spend_intents"],[
         ("Intent","id","mono"),("Status","status","state"),("Policy","policy_result","state"),("Purpose","purpose","summary"),
-        ("Max cost","max_cost_atomic","money"),("Expected ROI","expected_roi_bps","bps"),("Created","created_at","text"),
+        ("Max cost","max_cost_atomic","money"),("Created","created_at","text"),
     ],"No spend intents recorded yet.","spend-intents"))
     sections.append(table("Payments",tables["payment_entries"],[
         ("Payment","id","mono"),("Status","status","state"),("Direction","direction","direction"),("Amount","amount_atomic","money"),
@@ -295,6 +292,7 @@ def execute(args: argparse.Namespace) -> object:
             if not goal: raise finance.DomainError("METRON_GOAL_NOT_FOUND")
             policy=dict(db.execute("SELECT * FROM policies WHERE goal_id=?",(args.id,)).fetchone())
             policy.pop("reserve_floor_atomic",None)
+            policy.pop("minimum_expected_roi_bps",None)
             return {"goal":dict(goal),"policy":policy}
         if operation=="spend-propose": return finance.propose_spend(db,data)
         if operation=="spend-approve": return finance.approve_spend(db,args.id or "")

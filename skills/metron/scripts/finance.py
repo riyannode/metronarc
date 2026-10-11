@@ -72,9 +72,9 @@ def create_goal(db: sqlite3.Connection, data: dict) -> dict:
     daily = atomic(policy.get("max_daily_spend", "2"))
     minimum_wallet_balance = atomic(policy.get("minimum_wallet_balance", "0"))
     min_deal = atomic(policy.get("minimum_deal", "0"))
-    roi_bps = int(policy.get("minimum_expected_roi_bps", 50000))
+    roi_bps = 0
     reinvest_bps = int(policy.get("reinvestment_bps", 1000))
-    if target <= 0 or per_action <= 0 or daily < per_action or daily > budget or roi_bps < 0 or not 0 <= reinvest_bps <= 10000:
+    if target <= 0 or per_action <= 0 or daily < per_action or daily > budget or not 0 <= reinvest_bps <= 10000:
         raise DomainError("METRON_INVALID_POLICY")
     with store.transaction(db):
         goal_id = store.next_id(db, "goals", "GOAL")
@@ -104,7 +104,7 @@ def propose_spend(db: sqlite3.Connection, data: dict) -> dict:
     goal_id = str(data.get("goal_id", ""))
     with store.transaction(db):
         policy = require_goal(db, goal_id)
-        required = ("service_url","http_method","payment_scheme","accepted_chains","payee_address","purpose","reason","expected_output","quoted_cost","expected_value")
+        required = ("service_url","http_method","payment_scheme","accepted_chains","payee_address","purpose","reason","expected_output","quoted_cost")
         if any(not data.get(key) for key in required):
             raise DomainError("METRON_POLICY_MISSING")
         service=service_url(str(data["service_url"]))
@@ -127,12 +127,12 @@ def propose_spend(db: sqlite3.Connection, data: dict) -> dict:
         request_body_hash=hashlib.sha256(json.dumps(body,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest()
         quote = atomic(data["quoted_cost"])
         maximum = atomic(data.get("max_cost", data["quoted_cost"]))
-        expected = atomic(data["expected_value"])
+        expected = 0
         if quote <= 0 or maximum < quote:
             raise DomainError("METRON_INVALID_MONEY")
-        roi = min(expected * 10000 // quote,2**63-1) if quote else 2**63 - 1
+        roi = 0
         result = "ALLOW"
-        reason = "Policy limits and expected ROI pass"
+        reason = "Spend is within hard authorization limits"
         today = timestamp[:10]
         reserved_today = db.execute(
             "SELECT COALESCE(SUM(max_cost_atomic),0) FROM spend_intents WHERE goal_id=? AND ((status='APPROVED' AND substr(created_at,1,10)=?) OR (status IN ('SUBMITTED','EXECUTED','UNKNOWN') AND substr(COALESCE(executed_at,created_at),1,10)=?))",
@@ -145,8 +145,6 @@ def propose_spend(db: sqlite3.Connection, data: dict) -> dict:
         available_budget=policy["operating_budget_atomic"]+policy["reinvested_operating_capital_atomic"]
         if reserved_today + maximum > policy["max_daily_spend_atomic"] or reserved_total + maximum > available_budget:
             result, reason = "DENY", "Hard spend limit exceeded"
-        elif roi < policy["minimum_expected_roi_bps"]:
-            result, reason = "DENY", "Expected ROI is below policy minimum"
         elif maximum > policy["max_spend_per_action_atomic"]:
             result, reason = "ESCALATE", "Spend exceeds autonomous per-action authority"
         elif policy["require_human_on_customer_acceptance"] != 1:
@@ -162,8 +160,8 @@ def propose_spend(db: sqlite3.Connection, data: dict) -> dict:
             "INSERT INTO spend_intents(id,goal_id,counterparty_id,provider,service_url,http_method,payment_scheme,payee_address,request_body_hash,purpose,reason,expected_output,quoted_cost_atomic,max_cost_atomic,expected_value_atomic,expected_roi_bps,policy_result,status,reason_hash,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (intent_id,goal_id,counterparty_id,str(data.get("provider","CIRCLE")).upper(),service,method,scheme,payee,request_body_hash,str(data["purpose"]),str(data["reason"]),str(data["expected_output"]),quote,maximum,expected,roi,result,status,reason_hash,timestamp),
         )
-        store.event(db,"SPEND_INTENT_"+result,"spend_intent",intent_id,reason,{"max_cost_atomic":maximum,"expected_roi_bps":roi},timestamp)
-    return {"id":intent_id,"policy_result":result,"status":status,"expected_roi_bps":roi,"max_cost":"%s USDC"%display(maximum),"reason":reason,"http_method":method,"payment_scheme":scheme,"payee_address":payee,"request_body_hash":request_body_hash}
+        store.event(db,"SPEND_INTENT_"+result,"spend_intent",intent_id,reason,{"max_cost_atomic":maximum},timestamp)
+    return {"id":intent_id,"policy_result":result,"status":status,"max_cost":"%s USDC"%display(maximum),"reason":reason,"http_method":method,"payment_scheme":scheme,"payee_address":payee,"request_body_hash":request_body_hash}
 
 
 def approve_spend(db: sqlite3.Connection, intent_id: str) -> dict:
@@ -419,7 +417,25 @@ def status(db: sqlite3.Connection) -> dict:
     policy=db.execute("SELECT * FROM policies WHERE goal_id=?",(active["id"],)).fetchone()
     accounts=db.execute("SELECT jl.account_code,SUM(jl.debit_atomic-jl.credit_atomic) AS balance FROM journal_lines jl JOIN journal_entries je ON je.id=jl.journal_entry_id WHERE je.status='POSTED' GROUP BY jl.account_code").fetchall()
     balances={row["account_code"]:row["balance"] or 0 for row in accounts}
-    spends=balances.get("5000",0); revenue=-balances.get("4000",0)
+    confirmed_spend=db.execute(
+        "SELECT COALESCE(SUM(pe.amount_atomic),0) FROM payment_entries pe "
+        "JOIN spend_intents si ON pe.source_type='SPEND_INTENT' AND pe.source_id=si.id "
+        "WHERE si.goal_id=? AND pe.direction='OUT' AND pe.status='CONFIRMED' AND pe.currency='USDC'",
+        (active["id"],),
+    ).fetchone()[0]
+    collected_revenue=db.execute(
+        "SELECT COALESCE(SUM(pe.amount_atomic),0) FROM payment_entries pe "
+        "JOIN sales_invoices si ON pe.source_type='SALES_INVOICE' AND pe.source_id=si.id "
+        "JOIN deals d ON d.id=si.deal_id "
+        "JOIN counterparties c ON c.id=pe.counterparty_id AND c.id=si.counterparty_id "
+        "WHERE d.goal_id=? AND si.status='PAID' AND pe.direction='IN' AND pe.status='RECONCILED' "
+        "AND pe.currency='USDC' AND c.kind='CUSTOMER'",
+        (active["id"],),
+    ).fetchone()[0]
+    net_contribution=collected_revenue-confirmed_spend
+    realized_roi_bps=None
+    if confirmed_spend:
+        realized_roi_bps=(abs(net_contribution)*10000//confirmed_spend)*(1 if net_contribution>=0 else -1)
     pending=db.execute("SELECT COUNT(*) FROM deals WHERE status='PENDING_HUMAN'").fetchone()[0]
     earned=policy["reinvested_operating_capital_atomic"]
     today=now()[:10]
@@ -435,10 +451,11 @@ def status(db: sqlite3.Connection) -> dict:
         "initialized":True,
         "goal":{
             "id":active["id"],"target":"%s USDC"%display(active["revenue_target_atomic"]),
-            "revenue_generated":"%s USDC"%display(revenue),
+            "revenue_collected":"%s USDC"%display(collected_revenue),
             "operating_cash_journal_balance":"%s USDC"%display(balances.get("1000",0)),
-            "spend":"%s USDC"%display(spends),"net_contribution":"%s USDC"%display(revenue-spends),
-            "return_on_spend_bps":(revenue*10000//spends if spends else None),
+            "confirmed_spend":"%s USDC"%display(confirmed_spend),
+            "net_contribution":"%s USDC"%display(net_contribution),
+            "realized_roi_bps":realized_roi_bps,
         },
         "policy":{
             "seed_operating_budget":"%s USDC"%display(policy["operating_budget_atomic"]),
