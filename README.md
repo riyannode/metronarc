@@ -39,7 +39,6 @@ Create a goal from a JSON file (amounts are exact USDC decimal strings):
     "max_spend_per_action": "0.10",
     "max_daily_spend": "2",
     "minimum_wallet_balance": "10",
-    "minimum_expected_roi_bps": 50000,
     "reinvestment_bps": 1000,
     "minimum_deal": "450"
   }
@@ -50,7 +49,7 @@ Create a goal from a JSON file (amounts are exact USDC decimal strings):
 python3 -B skills/metron/scripts/run.py goal-create --input goal.json
 ```
 
-All runtime state is stored under `~/.metron/`, outside the plugin source/cache. The read-only dashboard is generated at `~/.metron/dashboard.html` and shows the active goal, recorded operating cash, spending and daily authorization limits, minimum Circle wallet balance, deal and approval counts, and latest records including open invoices. It does not show legacy account `1010` as a current balance.
+All runtime state is stored under `~/.metron/`, outside the plugin source/cache. The read-only dashboard is generated at `~/.metron/dashboard.html` and shows the active goal, collected revenue, confirmed spend, net contribution, realized ROI, earned operating capital, spending and daily authorization limits, minimum Circle wallet balance, deal and approval counts, and latest records including open invoices. It does not show legacy account `1010` as a current balance.
 
 ## Plugin install
 
@@ -74,7 +73,11 @@ EconomicRegistry is METRON's shared non-custodial provenance contract on Arc Tes
 
 Circle's authoritative settlement record supplies `payment_evidence.tx_hash` when an actual Arc transaction hash is available. METRON preserves that hash as the settlement reference that can be checked in the Arc explorer; a provider/transfer ID remains `provider_ref` and is not promoted to a fabricated transaction hash. Registry commitments use versioned, domain-separated SHA-256 hashes over canonical UTF-8 JSON. Spend-to-revenue attribution is optional and must be supplied explicitly when creating a deal; the referenced spend must belong to the same goal and have confirmed, journaled Circle evidence before a revenue commitment is queued. The external revenue evidence hash excludes all local business IDs, so the same Circle settlement has one stable evidence identity. See [Architecture](docs/ARCHITECTURE.md) for the exact preimages and recovery behavior.
 
-Spend `ALLOW` is automatically persisted as `APPROVED`; `ESCALATE` requires explicit persisted human approval, and `DENY` is terminal. Exceeding `max_spend_per_action` escalates. Exceeding `max_daily_spend`, available seed-plus-earned operating capital, or falling below `minimum_expected_roi_bps` denies, and human approval cannot bypass those hard limits. Below-minimum deals, deals marked `custom_or_legal_terms: true`, and deals with non-payer-wallet terms require pre-acceptance human approval. Customer acceptance always moves the deal to `PENDING_HUMAN`; a distinct final approval is required before invoice creation.
+Expected value is not required to authorize an x402 spend. Hard spending limits control authorization: exceeding `max_spend_per_action` escalates, while exceeding `max_daily_spend` or available seed-plus-earned operating capital denies; human approval cannot bypass those absolute caps. The live wallet balance must also cover the approved maximum plus `minimum_wallet_balance` immediately before dispatch. Spend `ALLOW` is automatically persisted as `APPROVED`; `ESCALATE` requires explicit persisted human approval, and `DENY` is terminal.
+
+Realized ROI is calculated only after outcomes are recorded, from confirmed outgoing x402 Payment Entries and reconciled incoming customer Payment Entries for PAID invoices belonging to the goal. Its formula is `(reconciled collected revenue - confirmed spend) / confirmed spend`; it is undefined when confirmed spend is zero. Expected value, quoted deal amounts, open invoices, customer promises, unconfirmed payments, and registry state are not used.
+
+Below-minimum deals, deals marked `custom_or_legal_terms: true`, and deals with non-payer-wallet terms require pre-acceptance human approval. Customer acceptance always moves the deal to `PENDING_HUMAN`; a distinct final approval is required before invoice creation.
 
 ## Scope and limitations
 
