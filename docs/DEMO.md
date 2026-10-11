@@ -8,8 +8,8 @@ Keep any recording under three minutes. Label all testnet activity and synthetic
 4. Use the host's own connected email capability for prospect communication. Escalate custom/legal or below-minimum commercial terms for persisted pre-acceptance approval. When the customer accepts terms, stop at `PENDING_HUMAN` and wait for the distinct final human approval.
 5. Approve the deal, post its invoice, then reconcile a controlled confirmed incoming testnet payment against the invoice.
 6. Show the resulting Cash/AR journal, reinvestment calculation, local read-only dashboard, then restart the host and show the same SQLite state.
-7. EconomicRegistry V1 is deprecated and V2 remains pending its vanity-deployer funding/deployment gate. Do not present V1 as active. A missing, pending, or failed registry record does not change payment or accounting truth.
+7. EconomicRegistry V1 is deprecated. Shared EconomicRegistry V2 is active on Arc Testnet; users do not deploy or fund it. A missing, pending, or failed registry record does not change payment or accounting truth.
 
-Do not demonstrate a vault, internal reserve transfer, or user contract deployment/funding. V2 becomes shared Arc Testnet provenance infrastructure only after its separate deployment and readback gate; Circle payments settle directly to or from the operating wallet.
+Do not demonstrate a vault, internal reserve transfer, or user contract deployment/funding. V2 is shared Arc Testnet provenance infrastructure; Circle payments settle directly to or from the operating wallet.
 
 Do not stage synthetic records as traction or describe a Circle transaction hash as the business transaction.

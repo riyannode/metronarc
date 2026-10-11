@@ -11,7 +11,7 @@ import finance
 import store
 
 
-CANONICAL_REGISTRIES: dict[str, str] = {}
+CANONICAL_REGISTRIES: dict[str, str] = {"ARC-TESTNET": "0x547552585d8d995c5063820b2950e0db52b4cab4"}
 CHAIN_ID = 5042002
 TX_HASH = re.compile(r"0x[0-9a-fA-F]{64}\Z")
 ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}\Z")

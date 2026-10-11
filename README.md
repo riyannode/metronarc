@@ -18,7 +18,7 @@ flowchart LR
 
 ## Current verification
 
-Circle Terms are never inferred from METRON use; see [Circle setup](docs/INSTALL.md#circle-setup) for the one-time explicit consent flow. Payment execution requires an authenticated Circle Agent Wallet and current Circle evidence. EconomicRegistry V1 is deprecated; V2 remains pending its separately funded Arc Testnet deployment. Contract deployment and read-only verification are not payment evidence. Synthetic fixtures do not prove live-provider behavior; testnet and synthetic records must remain labeled as such.
+Circle Terms are never inferred from METRON use; see [Circle setup](docs/INSTALL.md#circle-setup) for the one-time explicit consent flow. Payment execution requires an authenticated Circle Agent Wallet and current Circle evidence. EconomicRegistry V1 is deprecated; shared V2 provenance infrastructure is active on Arc Testnet. Contract deployment and read-only verification are not payment evidence. Synthetic fixtures do not prove live-provider behavior; testnet and synthetic records must remain labeled as such.
 
 ## Local quickstart
 
@@ -70,7 +70,7 @@ A Circle transaction is evidence. A Payment Entry is the business payment. A Jou
 
 Circle Agent Wallet is the sole operating-money account. Fund that wallet directly. METRON checks its live USDC balance before dispatch and requires the approved maximum cost plus `minimum_wallet_balance` to remain available. Local policy is deterministic but runs on the local machine.
 
-EconomicRegistry V2 is shared project provenance infrastructure, but its Arc Testnet deployment is pending the deployer faucet gate. V1 is deprecated and receives no further writes. Until V2 is deployed and its bytecode/readback verified, METRON skips registry writes; Circle remains payment authority and local SQLite/journal remain business truth. V2 supports multiple distinct revenue settlements per spend, while evidence hashes remain unique within each wallet namespace. Registry failure never reverses reconciled accounting or changes Circle settlement status.
+EconomicRegistry V2 is shared project provenance infrastructure active on Arc Testnet at `0x547552585d8d995c5063820b2950e0db52b4cab4` (chain ID `5042002`). V1 is deprecated and receives no further writes. METRON records only after local reconciliation; Circle remains payment authority and local SQLite/journal remain business truth. V2 supports multiple distinct revenue settlements per spend, while evidence hashes remain unique within each wallet namespace. Registry failure never reverses reconciled accounting or changes Circle settlement status. Users do not deploy or fund the shared registry.
 
 Circle's authoritative settlement record supplies `payment_evidence.tx_hash` when an actual Arc transaction hash is available. METRON preserves that hash as the settlement reference that can be checked in the Arc explorer; a provider/transfer ID remains `provider_ref` and is not promoted to a fabricated transaction hash. Registry commitments use versioned, domain-separated SHA-256 hashes over canonical UTF-8 JSON. Spend-to-revenue attribution is optional and must be supplied explicitly when creating a deal; the referenced spend must belong to the same goal and have confirmed, journaled Circle evidence before a revenue commitment is queued. The external revenue evidence hash excludes all local business IDs, so the same Circle settlement has one stable evidence identity. See [Architecture](docs/ARCHITECTURE.md) for the exact preimages and recovery behavior.
 
