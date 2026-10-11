@@ -132,6 +132,34 @@ def wallet_balance(address: str, chain: str) -> dict:
     return call(["wallet","balance","--address",address,"--chain",chain])
 
 
+def gateway_balance(address: str, chain: str) -> dict:
+    return call(["gateway","balance","--address",address,"--chain",chain])
+
+
+def gateway_available_balance_atomic(response: dict) -> int:
+    if not isinstance(response,dict) or not isinstance(response.get("data"),dict):
+        raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+    value=response["data"]
+    if value.get("token")!="USDC":
+        raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+    total=value.get("total")
+    rows=value.get("balances")
+    if not isinstance(total,str) or not isinstance(rows,list):
+        raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+    amount=_atomic_from_provider(total)
+    if len(rows)==0 and amount==0:
+        return 0
+    if len(rows)!=1 or not isinstance(rows[0],dict):
+        raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+    row=rows[0]
+    if not isinstance(row.get("network"),str) or not row["network"] or not isinstance(row.get("domain"),int) or isinstance(row["domain"],bool):
+        raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+    balance=row.get("balance")
+    if not isinstance(balance,str) or _atomic_from_provider(balance)!=amount or amount==0:
+        raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+    return amount
+
+
 def usdc_balance_atomic(response: dict) -> int:
     if not isinstance(response,dict): raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
     rows=None
