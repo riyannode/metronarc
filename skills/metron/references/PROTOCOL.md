@@ -10,7 +10,7 @@ Every paid action gets an immutable Spend Intent first. It binds the inspected s
 
 Realized ROI is a post-outcome metric calculated from local records: confirmed outgoing x402 Payment Entries for the goal and reconciled incoming customer Payment Entries for its PAID invoices. The formula is `(reconciled collected revenue - confirmed spend) / confirmed spend`, represented as integer basis points; it is undefined when confirmed spend is zero. Expected value, quoted deal amounts, open invoices, customer promises, unconfirmed payments, and registry state do not contribute.
 
-The `status` response exposes `goal.revenue_collected`, `goal.confirmed_spend`, and `goal.realized_roi_bps` as canonical fields. For response compatibility, deprecated `goal.revenue_generated`, `goal.spend`, and `goal.return_on_spend_bps` remain aliases of those respective fields and have the same reconciled, goal-scoped semantics.
+Since v0.1.2, the `status` response omits the legacy `goal.revenue_generated`, `goal.spend`, and `goal.return_on_spend_bps` fields rather than aliasing them to metrics with different semantics. Use `goal.revenue_collected`, `goal.confirmed_spend`, `goal.net_contribution`, and `goal.realized_roi_bps` as the canonical metrics.
 
 Confirmed invoice receipts add `amount * reinvestment_bps // 10000` to earned operating capital in the same SQLite transaction as payment reconciliation. Wallet funding, internal transfers, registry records, claims, and submissions do not increase earned capital. Later spend decisions use seed operating budget plus earned operating capital; per-action and daily limits continue to apply.
 
