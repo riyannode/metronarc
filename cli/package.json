@@ -1,6 +1,6 @@
 {
   "name": "@riyannode/metron",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Bootstrap CLI for discovering and installing the METRON plugin",
   "license": "MIT",
   "type": "module",
