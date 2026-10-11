@@ -140,20 +140,32 @@ def usdc_balance_atomic(response: dict) -> int:
     if rows is None and isinstance(response.get("data"),dict):
         for key in ("balances","tokens","items"):
             if isinstance(response["data"].get(key),list): rows=response["data"][key]; break
-    if rows is None: raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+    if not isinstance(rows,list): raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
     amounts=[]
+    usdc_address="0x3600000000000000000000000000000000000000"
     for item in rows:
-        if not isinstance(item,dict): continue
+        if not isinstance(item,dict): raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
         token=_first(item,("token","asset"))
         symbol=_first(item,("symbol","currency","tokenSymbol"))
         if isinstance(token,dict): symbol=symbol or _first(token,("symbol","name"))
-        if str(symbol or "").upper()!="USDC": continue
+        if not isinstance(symbol,str) or not symbol.strip(): raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+        if symbol.upper()!="USDC": continue
+        if not isinstance(token,dict) or str(token.get("blockchain","")).upper()!="ARC-TESTNET": raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
         value=_first(item,("available","balance","amount"))
         if value is None: raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
-        amounts.append(_atomic_from_provider(value))
+        amount=_atomic_from_provider(value)
+        if token.get("isNative") is True and token.get("decimals")==18 and token.get("tokenAddress") is None:
+            kind="native"
+        elif token.get("isNative") is False and token.get("decimals")==6 and str(token.get("tokenAddress","")).lower()==usdc_address:
+            kind="erc20"
+        else:
+            raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+        amounts.append((kind,amount))
     if not amounts: return 0
-    if len(amounts)!=1: raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
-    return amounts[0]
+    if len(amounts)==1: return amounts[0][1]
+    if len(amounts)==2 and {kind for kind,_ in amounts}=={"native","erc20"} and amounts[0][1]==amounts[1][1]:
+        return next(amount for kind,amount in amounts if kind=="erc20")
+    raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
 
 
 def service_search(query: str) -> dict:
