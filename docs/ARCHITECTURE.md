@@ -13,7 +13,7 @@ accepted deal -> PENDING_HUMAN -> explicit approval -> invoice -> AR/Revenue
 confirmed incoming USDC -> unique evidence consumption -> PAID -> Cash/AR
 ```
 
-Circle Agent Wallet is the only operating balance and pays x402 services directly. The wallet is authenticated and controlled through Circle CLI; METRON does not custody funds or route payments through a contract. Immediately before dispatch, METRON re-estimates the service and checks the current wallet balance against the approved maximum plus the configured minimum wallet balance. The check fails closed.
+Circle Agent Wallet is the only operating balance and pays x402 services directly. The wallet is authenticated and controlled through Circle CLI; METRON does not custody funds or route payments through a contract. Immediately before dispatch, `exact` checks on-chain wallet USDC and `GatewayWalletBatched` checks the chain-scoped Gateway available balance against the approved maximum plus the configured minimum wallet balance. There is no fallback between those pools; the check fails closed.
 
 Spend policy outcomes are persisted deterministically: `ALLOW` becomes `APPROVED` automatically; `ESCALATE` becomes `ESCALATED` until a human approves that specific intent; `DENY` becomes terminal `DENIED`. Per-action excess escalates, while daily-spend or available-capital excess and below-minimum expected ROI deny. Human approval cannot bypass those hard limits, which are rechecked atomically before dispatch reservation. Custom/legal deal terms (including non-payer-wallet `terms` fields) and below-minimum deal values require persisted pre-acceptance approval; explicit customer acceptance always enters `PENDING_HUMAN` and requires a distinct final approval before invoice creation.
 
@@ -21,7 +21,27 @@ New databases persist `minimum_wallet_balance_atomic`. On first initialization o
 
 After authoritative Circle reconciliation, METRON records normalized Payment Evidence, a Payment Entry, and balanced journal lines in SQLite. When Circle/Arc settlement evidence contains a real Arc transaction hash, METRON retains it as `payment_evidence.tx_hash`, the settlement reference that can be opened in the Arc explorer. A provider or Gateway transfer ID without a confirmed transaction hash remains `provider_ref`; METRON does not fabricate `tx_hash` or an explorer link.
 
-`revenueEvidenceHash` is a different value: a future versioned, domain-separated METRON commitment identifying authoritative external revenue-settlement evidence, not a blockchain transaction hash. A canonical commitment such as `METRON_REVENUE_EVIDENCE_V1` should bind chain identity, operating/destination wallet, Circle provider reference, actual `tx_hash` when available, payer/from address, destination/to address, asset/currency, and exact atomic amount. It must exclude local business identifiers such as `spendId`, `invoiceId`, `goalId`, `dealId`, and journal IDs so the same external settlement always has one evidence identity. The relationship from spend to evidence is recorded separately by the operating-wallet namespace and `revenueRecords[msg.sender][spendId]` (also exposed by `RevenueRecorded`); any future business-document anchoring requires a separate commitment or field. The intended order is authoritative Circle evidence -> METRON reconciliation -> Payment Evidence (including actual `tx_hash` when available) -> future canonical settlement-evidence commitment -> `EconomicRegistry`. Registry recording is `INACTIVE / DEFERRED`: this build has no application hash construction or registry writes. The contract is not in the payment path; registry activity cannot establish business truth or undo reconciled payment or accounting state.
+## EconomicRegistry provenance
+
+The shared `EconomicRegistry` is active on ARC-TESTNET (chain ID `5042002`) at `0xf91f72c2eef95f936d1a8a3dfbe3cb05a92c9e38`. Users do not deploy or fund it. Circle remains the money execution authority; SQLite plus the journal and authoritative Circle reconciliation remain business truth. Registry writes mirror commitments only after those local records commit. A failed or ambiguous registry write never rolls back reconciled accounting or changes Circle settlement to `UNKNOWN`.
+
+The contract has no payable entry point, token-transfer method, or payment path. Unsolicited ERC-20 transfers or forced native transfers may leave unrecoverable assets at the address; the registry has no method to recover them.
+
+Registry writes are restricted to `recordSpend(bytes32,bytes32,bytes32,bytes32,uint256)` and `recordRevenue(bytes32,bytes32,uint256,uint256)`. Readback uses `spendRecords(address,bytes32)`, `revenueRecords(address,bytes32)`, and `usedRevenueEvidence(address,bytes32)`. Contract state is namespaced by the configured operating wallet (`msg.sender`).
+
+Commitments use SHA-256 of UTF-8 JSON with sorted keys, compact separators, `ensure_ascii=false`, and explicit JSON `null`; amounts are exact integer atomic USDC. Hashes are prefixed with `0x` when passed as `bytes32`.
+
+| Domain | Canonical JSON fields, in addition to `domain` |
+|---|---|
+| `METRON_SPEND_ID_V1` | `spend_intent_id` |
+| `METRON_GOAL_V1` | `goal_id`, `currency`, `revenue_target_atomic` |
+| `METRON_SPEND_INTENT_V1` | `spend_id`, `goal_hash`, `provider`, `service_url`, `http_method`, `payment_scheme`, lowercase `payee_address`, `request_body_hash`, `purpose`, `reason`, `expected_output`, `quoted_cost_atomic`, `max_cost_atomic`, `expected_value_atomic`, `expected_roi_bps` |
+| `METRON_PAYMENT_EVIDENCE_V1` | `chain`, lowercase `operating_wallet`, `from_address`, `to_address`, `provider`, `provider_ref`, actual lowercase `tx_hash` or `null`, `currency`, `amount_atomic` |
+| `METRON_REVENUE_EVIDENCE_V1` | `chain`, lowercase `operating_wallet`, `provider`, `provider_ref`, actual lowercase `tx_hash` or `null`, payer `from_address`, destination `to_address`, `currency`, `amount_atomic` |
+
+The revenue evidence preimage deliberately excludes `spend_id`, invoice, goal, deal, journal, and registry row IDs. A deal may carry optional `originating_spend_intent_id`; creation verifies that the intent exists and belongs to the deal's goal. The relation stays on the deal through invoice reconciliation. Revenue is mirrored only after the incoming Circle evidence, invoice, journal, and deal are reconciled, and only if the attributed spend has confirmed execution evidence.
+
+`registry_records` is a non-destructive SQLite outbox with unique source and wallet/spend/type identities and states `PENDING`, `SUBMITTED`, `CONFIRMED`, `UNKNOWN`, and `FAILED`. Each write uses a stable idempotency key. Network calls run outside SQLite transactions. A manual `registry-sync` reads canonical contract state before it submits; matching state becomes `CONFIRMED`, mismatches fail closed, and an unresolved transaction reference remains `UNKNOWN` without an automatic duplicate submission. Provider IDs are not rendered as Arc transaction hashes; only a validated transaction hash links to the explorer.
 
 The dashboard is static HTML generated from SQLite. It does not write state or serve a network endpoint. Legacy journal account `1010` remains readable in old databases only; no new operation posts to it, and the dashboard does not present it as a current balance.
 

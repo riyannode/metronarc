@@ -56,7 +56,8 @@ CREATE TABLE IF NOT EXISTS deals (
   custom_or_legal_terms INTEGER NOT NULL DEFAULT 0 CHECK (custom_or_legal_terms IN (0,1)),
   custom_terms_approved INTEGER NOT NULL DEFAULT 0 CHECK (custom_terms_approved IN (0,1)),
   status TEXT NOT NULL CHECK (status IN ('PROSPECTING','NEGOTIATING','CUSTOMER_ACCEPTED','PENDING_HUMAN','HUMAN_APPROVED','HUMAN_REJECTED','INVOICED','CLOSED_WON','CLOSED_LOST')),
-  accepted_at TEXT, approved_at TEXT, created_at TEXT NOT NULL
+  accepted_at TEXT, approved_at TEXT, created_at TEXT NOT NULL,
+  originating_spend_intent_id TEXT REFERENCES spend_intents(id)
 );
 CREATE TABLE IF NOT EXISTS sales_invoices (
   id TEXT PRIMARY KEY, deal_id TEXT NOT NULL UNIQUE REFERENCES deals(id), counterparty_id TEXT NOT NULL REFERENCES counterparties(id),
@@ -92,8 +93,21 @@ CREATE TABLE IF NOT EXISTS events (
   id INTEGER PRIMARY KEY, event_type TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL,
   summary TEXT NOT NULL, data_json TEXT NOT NULL, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS registry_records (
+  id TEXT PRIMARY KEY, record_type TEXT NOT NULL CHECK (record_type IN ('SPEND','REVENUE')),
+  source_entity_id TEXT NOT NULL, operating_wallet TEXT NOT NULL, contract_address TEXT NOT NULL,
+  chain TEXT NOT NULL CHECK (chain='ARC-TESTNET'), spend_id TEXT NOT NULL,
+  goal_hash TEXT, spend_intent_hash TEXT, payment_evidence_hash TEXT, revenue_evidence_hash TEXT,
+  amount_atomic INTEGER NOT NULL CHECK (amount_atomic > 0), earned_capital_atomic INTEGER,
+  status TEXT NOT NULL CHECK (status IN ('PENDING','SUBMITTED','CONFIRMED','UNKNOWN','FAILED')),
+  idempotency_key TEXT NOT NULL, provider_tx_ref TEXT, tx_hash TEXT, error_code TEXT,
+  created_at TEXT NOT NULL, submitted_at TEXT, confirmed_at TEXT,
+  UNIQUE(record_type, source_entity_id), UNIQUE(chain, operating_wallet, spend_id, record_type)
+);
 CREATE INDEX IF NOT EXISTS idx_spend_intents_goal_status ON spend_intents(goal_id,status);
 CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_registry_records_status ON registry_records(status,record_type,created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_registry_revenue_evidence ON registry_records(chain,operating_wallet,revenue_evidence_hash) WHERE record_type='REVENUE';
 """
 
 
@@ -139,6 +153,8 @@ def initialize() -> dict[str, str]:
             db.execute("ALTER TABLE deals ADD COLUMN custom_or_legal_terms INTEGER NOT NULL DEFAULT 0 CHECK (custom_or_legal_terms IN (0,1))")
         if "custom_terms_approved" not in deal_columns:
             db.execute("ALTER TABLE deals ADD COLUMN custom_terms_approved INTEGER NOT NULL DEFAULT 0 CHECK (custom_terms_approved IN (0,1))")
+        if "originating_spend_intent_id" not in deal_columns:
+            db.execute("ALTER TABLE deals ADD COLUMN originating_spend_intent_id TEXT REFERENCES spend_intents(id)")
         db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_spend_provider_payment_id ON spend_intents(provider_payment_id)")
     if not CONFIG.exists():
         write_config({"chain": "ARC-TESTNET", "operating_wallet": None})
@@ -179,7 +195,7 @@ def transaction(db: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
 
 
 def next_id(db: sqlite3.Connection, table: str, prefix: str) -> str:
-    if table not in {"goals", "counterparties", "spend_intents", "deals", "sales_invoices", "payment_entries", "payment_evidence", "journal_entries"}:
+    if table not in {"goals", "counterparties", "spend_intents", "deals", "sales_invoices", "payment_entries", "payment_evidence", "journal_entries", "registry_records"}:
         raise ValueError("METRON_INVALID_ID_TABLE")
     number = db.execute(f"SELECT COUNT(*) + 1 FROM {table}").fetchone()[0]
     return f"{prefix}-{number:06d}"

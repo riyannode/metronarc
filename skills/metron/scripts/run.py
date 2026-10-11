@@ -14,6 +14,7 @@ from pathlib import Path
 
 import circle
 import finance
+import registry
 import store
 
 DASHBOARD_TEMPLATE = Path(__file__).resolve().parents[3]/"dashboard"/"index.html"
@@ -22,13 +23,13 @@ EVM_TX_HASH = re.compile(r"0x[0-9a-fA-F]{64}\Z")
 DASHBOARD_REFRESH_OPERATIONS = frozenset({
     "goal-create", "spend-propose", "spend-approve", "spend-execute", "payment-reconcile",
     "deal-create", "deal-update", "deal-accept", "deal-approve", "deal-reject",
-    "invoice-create", "invoice-post",
+    "invoice-create", "invoice-post", "registry-sync",
 })
 
 
 def parser() -> argparse.ArgumentParser:
     result=argparse.ArgumentParser(description="METRON local economic control and ledger")
-    result.add_argument("operation",nargs="?",choices=("init","status","config-set","contract-address","goal-create","goal-get","spend-propose","spend-approve","spend-estimate","spend-execute","service-search","service-inspect","circle-terms-status","circle-terms-accept","preflight","wallet-list","wallet-balance","deal-create","deal-get","deal-update","deal-accept","deal-approve","deal-reject","invoice-create","invoice-post","invoice-get","payment-sync","payment-reconcile","journal-list","payment-list","events","dashboard"))
+    result.add_argument("operation",nargs="?",choices=("init","status","config-set","contract-address","goal-create","goal-get","spend-propose","spend-approve","spend-estimate","spend-execute","service-search","service-inspect","circle-terms-status","circle-terms-accept","preflight","wallet-list","wallet-balance","deal-create","deal-get","deal-update","deal-accept","deal-approve","deal-reject","invoice-create","invoice-post","invoice-get","payment-sync","payment-reconcile","registry-sync","journal-list","payment-list","events","dashboard"))
     result.add_argument("--input",help="Path to a JSON input document")
     result.add_argument("--id",help="METRON entity ID")
     result.add_argument("--provider-ref",help="Circle transaction ID or hash for payment reconciliation")
@@ -61,14 +62,37 @@ def set_spend_unknown(intent_id: str, provider_ref: str | None=None, provider_am
         store.event(db,event,"spend_intent",intent_id,"Circle payment outcome requires authoritative reconciliation",{"provider_ref":provider_ref},finance.now())
 
 
+def registry_after_spend(db, intent_id: str) -> dict:
+    try:
+        record=registry.record_spend(db,intent_id)
+        if record.get("status")=="FAILED": return record
+        return registry.sync(db,record["id"])
+    except Exception:
+        return {"records":[{"status":"UNKNOWN","error_code":"METRON_REGISTRY_RECONCILIATION_FAILED"}]}
+
+
+def registry_after_revenue(db, invoice_id: str, earned_capital_atomic: int) -> dict:
+    try:
+        record=registry.record_revenue(db,invoice_id,earned_capital_atomic)
+        if record.get("status") in {"FAILED","SKIPPED"}: return record
+        return registry.sync(db)
+    except Exception:
+        return {"records":[{"status":"UNKNOWN","error_code":"METRON_REGISTRY_RECONCILIATION_FAILED"}]}
+
+
 def build_dashboard(db) -> str:
     status=finance.status(db)
+    status["economic_registry"]=registry.status(db)
     tables={name:finance.listing(db,name,10) for name in ("spend_intents","payment_entries","payment_evidence","journal_entries","deals","events")}
     tables["sales_invoices"]=[dict(row) for row in db.execute("SELECT * FROM sales_invoices WHERE status='OPEN' ORDER BY rowid DESC LIMIT 10").fetchall()]
     tables["payment_evidence"]=[dict(row) for row in db.execute(
         "SELECT e.*,p.status AS payment_status,p.direction,p.amount_atomic AS payment_amount_atomic "
         "FROM payment_evidence e JOIN payment_entries p ON p.id=e.payment_entry_id "
         "ORDER BY e.rowid DESC LIMIT 10"
+    ).fetchall()]
+    tables["registry_records"]=[dict(row) for row in db.execute(
+        "SELECT record_type,source_entity_id,chain,contract_address,status,provider_tx_ref,tx_hash,created_at,confirmed_at "
+        "FROM registry_records ORDER BY created_at DESC LIMIT 10"
     ).fetchall()]
     for journal in tables["journal_entries"]:
         journal["lines"]=db.execute("SELECT account_code,debit_atomic,credit_atomic,currency FROM journal_lines WHERE journal_entry_id=?",(journal["id"],)).fetchall()
@@ -83,7 +107,7 @@ def build_dashboard(db) -> str:
 
     def state(value) -> str:
         label=str(value or "—")
-        known={"APPROVED","ESCALATED","SUBMITTED","EXECUTED","UNKNOWN","CONFIRMED","RECONCILED","PENDING_HUMAN","HUMAN_APPROVED","HUMAN_REJECTED","PAID","OPEN","POSTED","PROPOSED","DENIED","FAILED","CREATED","PROSPECTING","NEGOTIATING","CUSTOMER_ACCEPTED","INVOICED","CLOSED_WON","CLOSED_LOST","DRAFT","VOID","PROPOSED","ALLOW","ESCALATE","DENY"}
+        known={"APPROVED","ESCALATED","SUBMITTED","EXECUTED","UNKNOWN","CONFIRMED","RECONCILED","PENDING","PENDING_HUMAN","HUMAN_APPROVED","HUMAN_REJECTED","PAID","OPEN","POSTED","PROPOSED","DENIED","FAILED","CREATED","PROSPECTING","NEGOTIATING","CUSTOMER_ACCEPTED","INVOICED","CLOSED_WON","CLOSED_LOST","DRAFT","VOID","PROPOSED","ALLOW","ESCALATE","DENY"}
         css=label.lower().replace("_","-") if label in known else "neutral"
         return f"<span class='badge badge--{css}'>{html.escape(label)}</span>"
 
@@ -185,6 +209,16 @@ def build_dashboard(db) -> str:
         ("Event","event_type","state"),("Entity","entity_type","text"),("ID","entity_id","mono"),
         ("Summary","summary","summary"),("Recorded","created_at","text"),
     ],"No activity recorded yet.","activity"))
+    registry_state=status["economic_registry"]
+    registry_header=("<section class='panel' id='economic-registry'><div class='section-heading'><div><p class='eyebrow'>IMMUTABLE PROVENANCE</p>"
+        f"<h2>EconomicRegistry · {html.escape(registry_state['activation_status'])}</h2></div></div>"
+        f"<p>Chain: {html.escape(registry_state['chain'])} · Contract: <span class='mono'>{html.escape(registry_state['contract_address'])}</span></p>"
+        "<p class='note'>This is a provenance mirror. SQLite, the journal, and authoritative Circle reconciliation remain business truth.</p></section>")
+    sections.append(registry_header+table("Registry records",tables["registry_records"],[
+        ("Type","record_type","text"),("Source","source_entity_id","mono"),("Status","status","state"),
+        ("Chain","chain","text"),("Contract","contract_address","mono"),("Arc transaction","tx_hash","tx"),
+        ("Confirmed","confirmed_at","text"),
+    ],"No reconciled provenance records yet.","registry-records"))
     template=DASHBOARD_TEMPLATE.read_text(encoding="utf-8")
     return (template.replace("<!-- METRON_PRIMARY_METRICS -->",primary_html)
         .replace("<!-- METRON_SECONDARY_METRICS -->",secondary_html)
@@ -251,7 +285,8 @@ def execute(args: argparse.Namespace) -> object:
         config=store.read_config(); config.update(data); store.write_config(config)
         return {"chain":config.get("chain","ARC-TESTNET"),"operating_wallet_configured":bool(config.get("operating_wallet"))}
     with store.connect() as db:
-        if operation=="status": return finance.status(db)
+        if operation=="status":
+            result=finance.status(db); result["economic_registry"]=registry.status(db); return result
         if operation=="goal-create": return finance.create_goal(db,data)
         if operation=="contract-address": return circle.contract_addresses(args.category,chain())
         if operation=="goal-get":
@@ -321,7 +356,8 @@ def execute(args: argparse.Namespace) -> object:
                 if record["status"]=="FAILED":
                     return {"record":record,"service_response":metadata["response"]}
                 if record["status"]!="CONFIRMED": raise circle.CircleError("METRON_PAYMENT_AMBIGUOUS")
-                return {"record":record,"service_response":metadata["response"]}
+                registry_result=registry_after_spend(db,intent_id)
+                return {"record":record,"registry":registry_result,"service_response":metadata["response"]}
             except (circle.CircleError,finance.DomainError):
                 set_spend_unknown(intent_id,provider_ref,provider_amount)
                 raise
@@ -361,14 +397,21 @@ def execute(args: argparse.Namespace) -> object:
                     payment=circle.gateway_x402_transfer(ref,chain())
                 else:
                     payment=circle.find_transaction(circle.transactions(wallet,chain()),ref)
-                return finance.record_spend_result(db,args.id,payment)
+                record=finance.record_spend_result(db,args.id,payment)
+                if record.get("status")=="CONFIRMED":
+                    record["registry"]=registry_after_spend(db,args.id)
+                return record
             if (args.id or "").startswith("PE-"):
                 raise finance.DomainError("METRON_LEGACY_INTERNAL_TRANSFER_UNSUPPORTED")
             invoice_id=args.id or str(data.get("invoice_id","")); ref=args.provider_ref or str(data.get("provider_ref",""))
             if not ref: raise finance.DomainError("METRON_PAYMENT_NOT_FOUND")
             payment=circle.find_transaction(circle.transactions(wallet,chain()),ref)
             payment["direction"]="IN" if payment["direction"] in ("IN","INBOUND") else payment["direction"]
-            return finance.reconcile_invoice(db,invoice_id,payment)
+            record=finance.reconcile_invoice(db,invoice_id,payment)
+            if record.get("status")=="PAID":
+                record["registry"]=registry_after_revenue(db,invoice_id,record["earned_capital_atomic"])
+            return record
+        if operation=="registry-sync": return registry.sync(db,args.id)
         if operation=="journal-list":
             rows=finance.listing(db,"journal_entries",args.limit)
             for row in rows: row["lines"]=[dict(line) for line in db.execute("SELECT account_code,debit_atomic,credit_atomic,currency FROM journal_lines WHERE journal_entry_id=?",(row["id"],))]

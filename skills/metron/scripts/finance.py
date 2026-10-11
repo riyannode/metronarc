@@ -243,6 +243,9 @@ def record_spend_result(db: sqlite3.Connection, intent_id: str, result: dict) ->
 def create_deal(db: sqlite3.Connection,data: dict) -> dict:
     timestamp=now(); goal_id=str(data.get("goal_id","")); name=str(data.get("customer","")); amount=atomic(data.get("amount"))
     if not name or amount<=0: raise DomainError("METRON_INVALID_DEAL")
+    originating_spend_intent_id=data.get("originating_spend_intent_id")
+    if originating_spend_intent_id is not None and (not isinstance(originating_spend_intent_id,str) or not originating_spend_intent_id):
+        raise DomainError("METRON_INVALID_DEAL")
     custom_or_legal_terms=data.get("custom_or_legal_terms",False)
     if not isinstance(custom_or_legal_terms,bool): raise DomainError("METRON_INVALID_DEAL")
     terms=data.get("terms",{})
@@ -253,16 +256,20 @@ def create_deal(db: sqlite3.Connection,data: dict) -> dict:
         raise DomainError("METRON_INVALID_DEAL")
     with store.transaction(db):
         policy=require_goal(db,goal_id)
+        if originating_spend_intent_id:
+            origin=db.execute("SELECT goal_id FROM spend_intents WHERE id=?",(originating_spend_intent_id,)).fetchone()
+            if origin is None: raise DomainError("METRON_SPEND_NOT_FOUND")
+            if origin["goal_id"]!=goal_id: raise DomainError("METRON_RECONCILIATION_MISMATCH")
         cp=store.next_id(db,"counterparties","CP"); deal=store.next_id(db,"deals","DEAL")
         db.execute("INSERT INTO counterparties(id,kind,name,external_ref,created_at) VALUES (?,?,?,?,?)",(cp,"PROSPECT",name,data.get("external_ref"),timestamp))
-        db.execute("INSERT INTO deals(id,counterparty_id,goal_id,amount_atomic,currency,terms_json,custom_or_legal_terms,status,created_at) VALUES (?,?,?,?,?,?,?,?,?)",(deal,cp,goal_id,amount,"USDC",json.dumps(terms,sort_keys=True),int(custom_or_legal_terms),"PROSPECTING",timestamp))
-        store.event(db,"DEAL_CREATED","deal",deal,"Deal created",{"counterparty_id":cp},timestamp)
+        db.execute("INSERT INTO deals(id,counterparty_id,goal_id,amount_atomic,currency,terms_json,custom_or_legal_terms,status,created_at,originating_spend_intent_id) VALUES (?,?,?,?,?,?,?,?,?,?)",(deal,cp,goal_id,amount,"USDC",json.dumps(terms,sort_keys=True),int(custom_or_legal_terms),"PROSPECTING",timestamp,originating_spend_intent_id))
+        store.event(db,"DEAL_CREATED","deal",deal,"Deal created",{"counterparty_id":cp,"originating_spend_intent_id":originating_spend_intent_id},timestamp)
         if amount < policy["minimum_deal_atomic"]:
             store.event(db,"DEAL_BELOW_MINIMUM","deal",deal,"Deal value is below policy minimum",{},timestamp)
     reasons=[]
     if amount < policy["minimum_deal_atomic"]: reasons.append("BELOW_MINIMUM_DEAL")
     if custom_or_legal_terms: reasons.append("CUSTOM_OR_LEGAL_TERMS")
-    return {"id":deal,"counterparty_id":cp,"status":"PROSPECTING","policy_result":"ESCALATE" if reasons else "ALLOW","escalation_reasons":reasons}
+    return {"id":deal,"counterparty_id":cp,"status":"PROSPECTING","policy_result":"ESCALATE" if reasons else "ALLOW","escalation_reasons":reasons,"originating_spend_intent_id":originating_spend_intent_id}
 
 
 def update_deal(db: sqlite3.Connection, deal_id: str, status: str) -> dict:
@@ -394,7 +401,7 @@ def reconcile_invoice(db: sqlite3.Connection, invoice_id: str, evidence: dict) -
             raise DomainError("METRON_INVALID_MONEY")
         db.execute("UPDATE policies SET reinvested_operating_capital_atomic=reinvested_operating_capital_atomic+?,updated_at=? WHERE id=?",(reinvest,timestamp,policy["id"]))
         store.event(db,"INVOICE_RECONCILED","sales_invoice",invoice_id,"Confirmed payment reconciled to invoice",{"payment_entry_id":entry,"journal_id":journal,"reinvestment_atomic":reinvest},timestamp)
-    return {"invoice_id":invoice_id,"status":"PAID","payment_entry_id":entry,"evidence_id":ev,"journal_id":journal,"reinvestment":"%s USDC"%display(reinvest)}
+    return {"invoice_id":invoice_id,"status":"PAID","payment_entry_id":entry,"evidence_id":ev,"journal_id":journal,"reinvestment":"%s USDC"%display(reinvest),"earned_capital_atomic":reinvest}
 
 
 def listing(db: sqlite3.Connection, table: str, limit: int=25) -> list[dict]:

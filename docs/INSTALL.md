@@ -25,7 +25,7 @@ After installing the plugin:
 3. Configure `chain` and `operating_wallet`, authenticate the Circle Agent Wallet through Circle CLI, and fund that wallet directly.
 4. Create a goal from a JSON file with `goal-create --input path.json`.
 
-METRON does not require users to deploy or fund a contract. The optional EconomicRegistry address is trusted project configuration and is inactive until a supported deployment is explicitly configured by METRON.
+The shared EconomicRegistry is already active on ARC-TESTNET at `0xf91f72c2eef95f936d1a8a3dfbe3cb05a92c9e38` (chain ID `5042002`). It is trusted project configuration, not a user setting. Users do not deploy or fund it; configure and fund only the Circle operating wallet.
 
 The repository marketplace uses the current portable root `plugin.json` format. Marketplace visibility and installation must be verified in the actual target client; parsing manifests alone is not installation verification.
 

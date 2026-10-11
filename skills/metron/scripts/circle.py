@@ -136,6 +136,18 @@ def gateway_balance(address: str, chain: str) -> dict:
     return call(["gateway","balance","--address",address,"--chain",chain])
 
 
+def registry_query(signature: str, parameters: list[str], contract: str, chain: str) -> dict:
+    return call(["contract","query",signature,*parameters,"--contract",contract,"--chain",chain])
+
+
+def registry_record_spend(contract: str, address: str, chain: str, spend_id: str, goal_hash: str, intent_hash: str, evidence_hash: str, amount: int, idempotency_key: str) -> dict:
+    return call(["wallet","execute","recordSpend(bytes32,bytes32,bytes32,bytes32,uint256)",spend_id,goal_hash,intent_hash,evidence_hash,str(amount),"--contract",contract,"--address",address,"--chain",chain,"--idempotency-key",idempotency_key],timeout=180)
+
+
+def registry_record_revenue(contract: str, address: str, chain: str, spend_id: str, evidence_hash: str, amount: int, earned_capital: int, idempotency_key: str) -> dict:
+    return call(["wallet","execute","recordRevenue(bytes32,bytes32,uint256,uint256)",spend_id,evidence_hash,str(amount),str(earned_capital),"--contract",contract,"--address",address,"--chain",chain,"--idempotency-key",idempotency_key],timeout=180)
+
+
 def gateway_available_balance_atomic(response: dict) -> int:
     if not isinstance(response,dict) or not isinstance(response.get("data"),dict):
         raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")

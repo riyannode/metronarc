@@ -35,6 +35,19 @@ The CLI returns stable codes in `{"ok":false,"error":{"code":...,"message":...}}
 | `METRON_CIRCLE_NOT_AUTHENTICATED` | Circle Agent Wallet needs user login/OTP. |
 | `METRON_CIRCLE_COMMAND_FAILED` | Circle CLI returned failure; inspect the CLI directly without exposing its credentials. |
 | `METRON_CIRCLE_SCHEMA_CHANGED` | Circle output did not match the strict JSON shape METRON accepts. |
+| `METRON_REGISTRY_ATTRIBUTION_INVALID` | Revenue attribution does not point to an existing, same-goal Spend Intent. |
+| `METRON_REGISTRY_EVIDENCE_INVALID` | Reconciled Circle evidence or its exact amount/address fields do not satisfy registry commitment requirements. |
+| `METRON_REGISTRY_ORIGIN_SPEND_PENDING` | The attributed spend is not yet confirmed on-chain; sync the spend record before recording revenue. |
+| `METRON_REGISTRY_PERSISTENCE_FAILED` | The local registry outbox could not persist the provenance record; business truth remains unchanged. |
+| `METRON_REGISTRY_RECORD_NOT_FOUND` | The requested registry outbox record does not exist; inspect local registry status and use its source entity ID. |
+| `METRON_REGISTRY_REVENUE_NOT_RECONCILED` | The incoming payment, invoice, journal, or deal is not fully reconciled for revenue recording. |
+| `METRON_REGISTRY_SCHEMA_CHANGED` | Circle's contract query output did not match the strict ABI result shape METRON accepts. |
+| `METRON_REGISTRY_SPEND_NOT_RECONCILED` | The Spend Intent lacks confirmed Circle evidence or a posted expense journal. |
+| `METRON_REGISTRY_WRITE_FAILED` | Circle rejected the registry transaction; reconcile local registry state before retrying. |
+| `METRON_REGISTRY_WRITE_PENDING_READBACK` | A prior registry transaction reference exists but the expected record is not yet visible; preserve `UNKNOWN` and sync again. |
+| `METRON_REGISTRY_READBACK_PENDING` | The write returned without a matching authoritative contract readback; preserve `UNKNOWN` and sync again. |
+| `METRON_REGISTRY_RECONCILIATION_MISMATCH` | On-chain fields conflict with the intended commitment; do not resubmit or alter local business truth. |
+| `METRON_REGISTRY_RECONCILIATION_FAILED` | Registry readback or reconciliation failed; retry only the registry sync after the provider is available. |
 | `METRON_CIRCLE_TIMEOUT` | Circle did not return before timeout; payment status may be ambiguous. |
 | `METRON_PAYMENT_AMBIGUOUS` | Preserve `UNKNOWN`; query authoritative Circle transaction history or x402 transfer status before any retry. |
 | `METRON_PAYMENT_NOT_FOUND` | Provider reference was not found in the authoritative Circle response. |
@@ -58,3 +71,4 @@ The CLI returns stable codes in `{"ok":false,"error":{"code":...,"message":...}}
 - `METRON_CUSTOM_TERMS_APPROVAL_REQUIRED` requires explicit pre-acceptance `deal-approve`; customer acceptance still triggers its own separate final approval gate.
 - `METRON_HUMAN_APPROVAL_REQUIRED` needs a direct human decision.
 - `METRON_CIRCLE_NOT_AUTHENTICATED` requires the wallet owner to complete the email OTP in Circle CLI. Never store the OTP in METRON state or repository files.
+- Registry sync failures affect only provenance state. They do not change reconciled Circle payment, invoice, journal, or operating-capital state; keep ambiguous writes `UNKNOWN` until contract readback resolves them.
