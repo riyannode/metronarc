@@ -3,6 +3,8 @@ pragma solidity 0.8.30;
 
 /// @notice Immutable, caller-namespaced commitments to locally reconciled economic activity.
 contract EconomicRegistry {
+    string public constant VERSION = "2";
+
     struct SpendRecord {
         address operatingWallet;
         bytes32 goalHash;
@@ -10,7 +12,7 @@ contract EconomicRegistry {
         bytes32 paymentEvidenceHash;
         uint256 amount;
         uint256 recordedAt;
-        bool revenueLinked;
+        uint256 revenueCount;
     }
 
     struct RevenueRecord {
@@ -25,11 +27,10 @@ contract EconomicRegistry {
     error SpendAlreadyRecorded(address operatingWallet, bytes32 spendId);
     error SpendNotFound(address operatingWallet, bytes32 spendId);
     error RevenueAlreadyRecorded(address operatingWallet, bytes32 revenueEvidenceHash);
-    error RevenueAlreadyLinked(address operatingWallet, bytes32 spendId);
     error InvalidRevenueRecord();
 
     mapping(address => mapping(bytes32 => SpendRecord)) public spendRecords;
-    mapping(address => mapping(bytes32 => RevenueRecord)) public revenueRecords;
+    mapping(address => mapping(bytes32 => mapping(bytes32 => RevenueRecord))) public revenueRecords;
     mapping(address => mapping(bytes32 => bool)) public usedRevenueEvidence;
 
     event SpendRecorded(
@@ -67,7 +68,7 @@ contract EconomicRegistry {
 
         uint256 timestamp = block.timestamp;
         spendRecords[msg.sender][spendId] =
-            SpendRecord(msg.sender, goalHash, spendIntentHash, paymentEvidenceHash, amount, timestamp, false);
+            SpendRecord(msg.sender, goalHash, spendIntentHash, paymentEvidenceHash, amount, timestamp, 0);
         emit SpendRecorded(msg.sender, spendId, goalHash, spendIntentHash, paymentEvidenceHash, amount, timestamp);
     }
 
@@ -76,7 +77,6 @@ contract EconomicRegistry {
     {
         SpendRecord storage spend = spendRecords[msg.sender][spendId];
         if (spend.operatingWallet == address(0)) revert SpendNotFound(msg.sender, spendId);
-        if (spend.revenueLinked) revert RevenueAlreadyLinked(msg.sender, spendId);
         if (revenueEvidenceHash == bytes32(0) || revenueAmount == 0 || earnedCapital > revenueAmount) {
             revert InvalidRevenueRecord();
         }
@@ -86,8 +86,8 @@ contract EconomicRegistry {
 
         uint256 timestamp = block.timestamp;
         usedRevenueEvidence[msg.sender][revenueEvidenceHash] = true;
-        spend.revenueLinked = true;
-        revenueRecords[msg.sender][spendId] =
+        spend.revenueCount += 1;
+        revenueRecords[msg.sender][spendId][revenueEvidenceHash] =
             RevenueRecord(spendId, revenueEvidenceHash, revenueAmount, earnedCapital, timestamp);
         emit RevenueRecorded(msg.sender, spendId, revenueEvidenceHash, revenueAmount, earnedCapital, timestamp);
     }

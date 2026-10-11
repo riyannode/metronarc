@@ -11,7 +11,7 @@ import finance
 import store
 
 
-CANONICAL_REGISTRIES = {"ARC-TESTNET": "0xf91f72c2eef95f936d1a8a3dfbe3cb05a92c9e38"}
+CANONICAL_REGISTRIES: dict[str, str] = {}
 CHAIN_ID = 5042002
 TX_HASH = re.compile(r"0x[0-9a-fA-F]{64}\Z")
 ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}\Z")
@@ -49,13 +49,17 @@ def _atomic(value: object) -> int:
     return value
 
 
-def _context() -> tuple[str, str]:
+def _chain() -> str:
     config = store.read_config()
     chain = str(config.get("chain", "ARC-TESTNET")).upper()
-    wallet = _address(config.get("operating_wallet"))
-    if chain not in CANONICAL_REGISTRIES:
+    if chain != "ARC-TESTNET":
         raise RegistryError("METRON_UNSUPPORTED_CHAIN")
-    return chain, wallet
+    return chain
+
+
+def _context() -> tuple[str, str]:
+    config = store.read_config()
+    return _chain(), _address(config.get("operating_wallet"))
 
 
 def _spend_fields(db: sqlite3.Connection, intent_id: str) -> dict:
@@ -104,7 +108,7 @@ def _spend_fields(db: sqlite3.Connection, intent_id: str) -> dict:
     })
     return {
         "source_entity_id": row["id"], "operating_wallet": wallet,
-        "contract_address": CANONICAL_REGISTRIES[chain], "chain": chain,
+        "contract_address": CANONICAL_REGISTRIES.get(chain), "chain": chain,
         "spend_id": spend_id, "goal_hash": goal_hash, "spend_intent_hash": intent_hash,
         "payment_evidence_hash": payment_hash, "revenue_evidence_hash": None,
         "amount_atomic": amount, "earned_capital_atomic": None,
@@ -114,18 +118,19 @@ def _spend_fields(db: sqlite3.Connection, intent_id: str) -> dict:
 def _insert(db: sqlite3.Connection, record_type: str, fields: dict) -> dict:
     with store.transaction(db):
         existing = db.execute(
-            "SELECT * FROM registry_records WHERE record_type=? AND source_entity_id=?",
+            "SELECT * FROM registry_records WHERE registry_version='V2' AND record_type=? AND source_entity_id=?",
             (record_type, fields["source_entity_id"]),
         ).fetchone()
         if existing:
             return dict(existing)
         record_id = store.next_id(db, "registry_records", "REG")
-        identity = f"metron-registry-v1:{fields['chain']}:{fields['operating_wallet']}:{record_type}:{fields['spend_id']}"
+        item_id = fields["spend_id"] if record_type == "SPEND" else fields["revenue_evidence_hash"]
+        identity = f"metron-registry-v2:{fields['chain']}:{fields['operating_wallet']}:{record_type}:{item_id}"
         key = str(uuid.uuid5(uuid.NAMESPACE_URL, identity))
         db.execute(
-            "INSERT INTO registry_records(id,record_type,source_entity_id,operating_wallet,contract_address,chain,spend_id,"
+            "INSERT INTO registry_records(id,registry_version,record_type,source_entity_id,operating_wallet,contract_address,chain,spend_id,"
             "goal_hash,spend_intent_hash,payment_evidence_hash,revenue_evidence_hash,amount_atomic,earned_capital_atomic,"
-            "status,idempotency_key,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'PENDING',?,?)",
+            "status,idempotency_key,created_at) VALUES (?,'V2',?,?,?,?,?,?,?,?,?,?,?,?,'PENDING',?,?)",
             (record_id, record_type, fields["source_entity_id"], fields["operating_wallet"], fields["contract_address"],
              fields["chain"], fields["spend_id"], fields["goal_hash"], fields["spend_intent_hash"],
              fields["payment_evidence_hash"], fields["revenue_evidence_hash"], fields["amount_atomic"],
@@ -136,6 +141,9 @@ def _insert(db: sqlite3.Connection, record_type: str, fields: dict) -> dict:
 
 def record_spend(db: sqlite3.Connection, intent_id: str) -> dict:
     try:
+        chain = _chain()
+        if chain not in CANONICAL_REGISTRIES:
+            return {"status": "SKIPPED", "reason": "V2_DEPLOYMENT_PENDING"}
         return _insert(db, "SPEND", _spend_fields(db, intent_id))
     except (RegistryError, sqlite3.Error) as exc:
         return {"status": "FAILED", "error_code": getattr(exc, "code", "METRON_REGISTRY_PERSISTENCE_FAILED")}
@@ -143,6 +151,9 @@ def record_spend(db: sqlite3.Connection, intent_id: str) -> dict:
 
 def record_revenue(db: sqlite3.Connection, invoice_id: str, earned_capital_atomic: int) -> dict:
     try:
+        chain = _chain()
+        if chain not in CANONICAL_REGISTRIES:
+            return {"status": "SKIPPED", "reason": "V2_DEPLOYMENT_PENDING"}
         invoice = db.execute(
             "SELECT i.*,d.goal_id,d.originating_spend_intent_id,d.status AS deal_status "
             "FROM sales_invoices i JOIN deals d ON d.id=i.deal_id WHERE i.id=? AND i.status='PAID' AND d.status='CLOSED_WON'",
@@ -211,18 +222,20 @@ def _words(response: dict, expected: int) -> list[str]:
     return words
 
 
-def _spend_state(row: sqlite3.Row) -> tuple[list[str], bool]:
+def _spend_state(row: sqlite3.Row) -> tuple[list[str], bool, int]:
     response = circle.registry_query(
         "spendRecords(address,bytes32)", [row["operating_wallet"], row["spend_id"]], row["contract_address"], row["chain"]
     )
     words = _words(response, 7)
     exists = int(words[0], 16) != 0
-    return words[:5], exists
+    return words[:5], exists, int(words[6], 16)
 
 
 def _revenue_state(row: sqlite3.Row) -> tuple[list[str], bool, bool]:
     response = circle.registry_query(
-        "revenueRecords(address,bytes32)", [row["operating_wallet"], row["spend_id"]], row["contract_address"], row["chain"]
+        "revenueRecords(address,bytes32,bytes32)",
+        [row["operating_wallet"], row["spend_id"], row["revenue_evidence_hash"]],
+        row["contract_address"], row["chain"]
     )
     words = _words(response, 5)
     exists = int(words[0], 16) != 0
@@ -271,15 +284,18 @@ def _decode_output(response: dict) -> dict:
 
 def _sync_one(db: sqlite3.Connection, record: sqlite3.Row) -> dict:
     record = db.execute("SELECT * FROM registry_records WHERE id=?", (record["id"],)).fetchone()
+    active_contract = CANONICAL_REGISTRIES.get(record["chain"])
+    if record["registry_version"] != "V2" or not active_contract or record["contract_address"] != active_contract:
+        return {"id": record["id"], "registry_version": record["registry_version"], "status": "DEPRECATED"}
     try:
         if record["record_type"] == "SPEND":
-            current, exists = _spend_state(record)
+            current, exists, revenue_count = _spend_state(record)
             if exists:
                 if current != _expected_spend(record):
                     _mark(db, record["id"], "FAILED", error_code="METRON_REGISTRY_RECONCILIATION_MISMATCH")
                     return {"id": record["id"], "status": "FAILED", "error_code": "METRON_REGISTRY_RECONCILIATION_MISMATCH"}
                 _mark(db, record["id"], "CONFIRMED", confirmed_at=finance.now())
-                return {"id": record["id"], "status": "CONFIRMED", "tx_hash": record["tx_hash"]}
+                return {"id": record["id"], "status": "CONFIRMED", "tx_hash": record["tx_hash"], "revenue_count": revenue_count}
             if record["provider_tx_ref"]:
                 _mark(db, record["id"], "UNKNOWN", error_code="METRON_REGISTRY_WRITE_PENDING_READBACK")
                 return {"id": record["id"], "status": "UNKNOWN", "error_code": "METRON_REGISTRY_WRITE_PENDING_READBACK"}
@@ -300,12 +316,13 @@ def _sync_one(db: sqlite3.Connection, record: sqlite3.Row) -> dict:
                 _mark(db, record["id"], "FAILED", error_code="METRON_REGISTRY_RECONCILIATION_MISMATCH")
                 return {"id": record["id"], "status": "FAILED", "error_code": "METRON_REGISTRY_RECONCILIATION_MISMATCH"}
             spend_row = db.execute(
-                "SELECT * FROM registry_records WHERE record_type='SPEND' AND operating_wallet=? AND spend_id=?",
-                (record["operating_wallet"], record["spend_id"]),
+                "SELECT * FROM registry_records WHERE registry_version='V2' AND record_type='SPEND' "
+                "AND operating_wallet=? AND spend_id=? AND contract_address=?",
+                (record["operating_wallet"], record["spend_id"], active_contract),
             ).fetchone()
             if spend_row is None:
                 return {"id": record["id"], "status": record["status"], "error_code": "METRON_REGISTRY_ORIGIN_SPEND_PENDING"}
-            spend_current, spend_exists = _spend_state(spend_row)
+            spend_current, spend_exists, _ = _spend_state(spend_row)
             if not spend_exists or spend_current != _expected_spend(spend_row):
                 return {"id": record["id"], "status": record["status"], "error_code": "METRON_REGISTRY_ORIGIN_SPEND_PENDING"}
             if record["provider_tx_ref"]:
@@ -326,16 +343,20 @@ def _sync_one(db: sqlite3.Connection, record: sqlite3.Row) -> dict:
             return {"id": record["id"], "status": "FAILED", "error_code": "METRON_REGISTRY_WRITE_FAILED"}
         _mark(db, record["id"], "SUBMITTED", provider_tx_ref=provider_ref, tx_hash=tx_hash)
         if record["record_type"] == "SPEND":
-            confirmed, exists = _spend_state(record)
+            confirmed, exists, revenue_count = _spend_state(record)
             matches = exists and confirmed == _expected_spend(record)
         else:
             confirmed, exists, used = _revenue_state(record)
+            revenue_count = None
             matches = exists and used and confirmed == _expected_revenue(record)
         if not matches:
             _mark(db, record["id"], "UNKNOWN", error_code="METRON_REGISTRY_READBACK_PENDING")
             return {"id": record["id"], "status": "UNKNOWN", "tx_hash": tx_hash}
         _mark(db, record["id"], "CONFIRMED", confirmed_at=finance.now())
-        return {"id": record["id"], "status": "CONFIRMED", "tx_hash": tx_hash}
+        result = {"id": record["id"], "status": "CONFIRMED", "tx_hash": tx_hash}
+        if revenue_count is not None:
+            result["revenue_count"] = revenue_count
+        return result
     except (circle.CircleError, RegistryError, sqlite3.Error) as exc:
         code = getattr(exc, "code", "METRON_REGISTRY_RECONCILIATION_FAILED")
         try:
@@ -347,28 +368,43 @@ def _sync_one(db: sqlite3.Connection, record: sqlite3.Row) -> dict:
 
 def sync(db: sqlite3.Connection, record_id: str | None = None) -> dict:
     if record_id:
-        rows = db.execute("SELECT * FROM registry_records WHERE id=? AND status IN ('PENDING','SUBMITTED','UNKNOWN')", (record_id,)).fetchall()
-    else:
-        rows = db.execute(
-            "SELECT * FROM registry_records WHERE status IN ('PENDING','SUBMITTED','UNKNOWN') "
-            "ORDER BY CASE record_type WHEN 'SPEND' THEN 0 ELSE 1 END,created_at"
-        ).fetchall()
-    if record_id and not rows:
-        existing = db.execute("SELECT id,status,tx_hash,error_code FROM registry_records WHERE id=?", (record_id,)).fetchone()
-        if existing is None:
+        requested = db.execute("SELECT * FROM registry_records WHERE id=?", (record_id,)).fetchone()
+        if requested is None:
             raise finance.DomainError("METRON_REGISTRY_RECORD_NOT_FOUND")
-        return {"records": [dict(existing)]}
+        if requested["registry_version"] == "V1":
+            return {"records": [{"id": record_id, "registry_version": "V1", "status": "DEPRECATED"}]}
+        rows = db.execute(
+            "SELECT * FROM registry_records WHERE id=? AND registry_version='V2' "
+            "AND status IN ('PENDING','SUBMITTED','UNKNOWN')", (record_id,)
+        ).fetchall()
+    else:
+        contract = CANONICAL_REGISTRIES.get("ARC-TESTNET")
+        if not contract:
+            return {"records": []}
+        rows = db.execute(
+            "SELECT * FROM registry_records WHERE registry_version='V2' AND contract_address=? "
+            "AND status IN ('PENDING','SUBMITTED','UNKNOWN') "
+            "ORDER BY CASE record_type WHEN 'SPEND' THEN 0 ELSE 1 END,created_at", (contract,)
+        ).fetchall()
+        if record_id and not rows:
+            return {"records": [dict(requested)]}
     return {"records": [_sync_one(db, row) for row in rows]}
 
 
 def status(db: sqlite3.Connection) -> dict:
     chain = "ARC-TESTNET"
     counts = {row["status"]: row["count"] for row in db.execute(
-        "SELECT status,COUNT(*) AS count FROM registry_records GROUP BY status"
+        "SELECT status,COUNT(*) AS count FROM registry_records WHERE registry_version='V2' GROUP BY status"
     ).fetchall()}
     latest = [dict(row) for row in db.execute(
-        "SELECT record_type,source_entity_id,chain,contract_address,status,provider_tx_ref,tx_hash,created_at,submitted_at,confirmed_at "
+        "SELECT registry_version,record_type,source_entity_id,chain,contract_address,status,provider_tx_ref,tx_hash,created_at,submitted_at,confirmed_at "
         "FROM registry_records ORDER BY created_at DESC LIMIT 10"
     ).fetchall()]
-    return {"chain": chain, "chain_id": CHAIN_ID, "contract_address": CANONICAL_REGISTRIES[chain],
-            "activation_status": "ACTIVE", "counts": counts, "latest_records": latest}
+    deprecated_v1_records = db.execute(
+        "SELECT COUNT(*) FROM registry_records WHERE registry_version='V1'"
+    ).fetchone()[0]
+    contract = CANONICAL_REGISTRIES.get(chain)
+    return {"chain": chain, "chain_id": CHAIN_ID, "contract_address": contract,
+            "registry_version": "V2", "activation_status": "ACTIVE" if contract else "PENDING_DEPLOYMENT",
+            "deprecated_v1_records": deprecated_v1_records,
+            "counts": counts, "latest_records": latest}

@@ -94,20 +94,32 @@ CREATE TABLE IF NOT EXISTS events (
   summary TEXT NOT NULL, data_json TEXT NOT NULL, created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS registry_records (
-  id TEXT PRIMARY KEY, record_type TEXT NOT NULL CHECK (record_type IN ('SPEND','REVENUE')),
+  id TEXT PRIMARY KEY, registry_version TEXT NOT NULL CHECK (registry_version IN ('V1','V2')),
+  record_type TEXT NOT NULL CHECK (record_type IN ('SPEND','REVENUE')),
   source_entity_id TEXT NOT NULL, operating_wallet TEXT NOT NULL, contract_address TEXT NOT NULL,
   chain TEXT NOT NULL CHECK (chain='ARC-TESTNET'), spend_id TEXT NOT NULL,
   goal_hash TEXT, spend_intent_hash TEXT, payment_evidence_hash TEXT, revenue_evidence_hash TEXT,
   amount_atomic INTEGER NOT NULL CHECK (amount_atomic > 0), earned_capital_atomic INTEGER,
   status TEXT NOT NULL CHECK (status IN ('PENDING','SUBMITTED','CONFIRMED','UNKNOWN','FAILED')),
   idempotency_key TEXT NOT NULL, provider_tx_ref TEXT, tx_hash TEXT, error_code TEXT,
-  created_at TEXT NOT NULL, submitted_at TEXT, confirmed_at TEXT,
-  UNIQUE(record_type, source_entity_id), UNIQUE(chain, operating_wallet, spend_id, record_type)
+  created_at TEXT NOT NULL, submitted_at TEXT, confirmed_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_spend_intents_goal_status ON spend_intents(goal_id,status);
 CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_registry_records_status ON registry_records(status,record_type,created_at);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_registry_revenue_evidence ON registry_records(chain,operating_wallet,revenue_evidence_hash) WHERE record_type='REVENUE';
+"""
+
+REGISTRY_TABLE_SQL = """
+CREATE TABLE registry_records (
+  id TEXT PRIMARY KEY, registry_version TEXT NOT NULL CHECK (registry_version IN ('V1','V2')),
+  record_type TEXT NOT NULL CHECK (record_type IN ('SPEND','REVENUE')),
+  source_entity_id TEXT NOT NULL, operating_wallet TEXT NOT NULL, contract_address TEXT NOT NULL,
+  chain TEXT NOT NULL CHECK (chain='ARC-TESTNET'), spend_id TEXT NOT NULL,
+  goal_hash TEXT, spend_intent_hash TEXT, payment_evidence_hash TEXT, revenue_evidence_hash TEXT,
+  amount_atomic INTEGER NOT NULL CHECK (amount_atomic > 0), earned_capital_atomic INTEGER,
+  status TEXT NOT NULL CHECK (status IN ('PENDING','SUBMITTED','CONFIRMED','UNKNOWN','FAILED')),
+  idempotency_key TEXT NOT NULL, provider_tx_ref TEXT, tx_hash TEXT, error_code TEXT,
+  created_at TEXT NOT NULL, submitted_at TEXT, confirmed_at TEXT
+)
 """
 
 
@@ -125,6 +137,19 @@ def connect() -> sqlite3.Connection:
 def initialize() -> dict[str, str]:
     with connect() as db:
         db.executescript(SCHEMA)
+        _migrate_registry_records(db)
+        db.executescript("""
+            CREATE INDEX IF NOT EXISTS idx_registry_records_status ON registry_records(status,record_type,created_at);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_registry_revenue_evidence
+              ON registry_records(chain,operating_wallet,revenue_evidence_hash) WHERE record_type='REVENUE';
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_registry_v2_source
+              ON registry_records(record_type,source_entity_id) WHERE registry_version='V2';
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_registry_v2_spend
+              ON registry_records(chain,operating_wallet,spend_id)
+              WHERE registry_version='V2' AND record_type='SPEND';
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_registry_v2_idempotency
+              ON registry_records(idempotency_key) WHERE registry_version='V2';
+        """)
         columns={row[1] for row in db.execute("PRAGMA table_info(spend_intents)")}
         additions=(
             ("http_method","TEXT NOT NULL DEFAULT 'GET'"),
@@ -164,6 +189,27 @@ def initialize() -> dict[str, str]:
             config.pop("vault_address")
             write_config(config)
     return {"database": str(DATABASE), "config": str(CONFIG)}
+
+
+def _migrate_registry_records(db: sqlite3.Connection) -> None:
+    columns = {row[1] for row in db.execute("PRAGMA table_info(registry_records)")}
+    if "registry_version" in columns:
+        return
+    with transaction(db):
+        db.execute("ALTER TABLE registry_records RENAME TO registry_records_legacy_v1")
+        db.execute("DROP INDEX IF EXISTS idx_registry_records_status")
+        db.execute("DROP INDEX IF EXISTS idx_registry_revenue_evidence")
+        db.execute(REGISTRY_TABLE_SQL)
+        db.execute(
+            "INSERT INTO registry_records (id,registry_version,record_type,source_entity_id,operating_wallet,contract_address,"
+            "chain,spend_id,goal_hash,spend_intent_hash,payment_evidence_hash,revenue_evidence_hash,amount_atomic,"
+            "earned_capital_atomic,status,idempotency_key,provider_tx_ref,tx_hash,error_code,created_at,submitted_at,confirmed_at) "
+            "SELECT id,'V1',record_type,source_entity_id,operating_wallet,contract_address,chain,spend_id,goal_hash,"
+            "spend_intent_hash,payment_evidence_hash,revenue_evidence_hash,amount_atomic,earned_capital_atomic,status,"
+            "idempotency_key,provider_tx_ref,tx_hash,error_code,created_at,submitted_at,confirmed_at "
+            "FROM registry_records_legacy_v1"
+        )
+        db.execute("DROP TABLE registry_records_legacy_v1")
 
 
 def read_config() -> dict:
