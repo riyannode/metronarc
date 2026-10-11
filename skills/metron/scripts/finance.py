@@ -452,10 +452,13 @@ def status(db: sqlite3.Connection) -> dict:
         "goal":{
             "id":active["id"],"target":"%s USDC"%display(active["revenue_target_atomic"]),
             "revenue_collected":"%s USDC"%display(collected_revenue),
+            "revenue_generated":"%s USDC"%display(collected_revenue),
             "operating_cash_journal_balance":"%s USDC"%display(balances.get("1000",0)),
             "confirmed_spend":"%s USDC"%display(confirmed_spend),
+            "spend":"%s USDC"%display(confirmed_spend),
             "net_contribution":"%s USDC"%display(net_contribution),
             "realized_roi_bps":realized_roi_bps,
+            "return_on_spend_bps":realized_roi_bps,
         },
         "policy":{
             "seed_operating_budget":"%s USDC"%display(policy["operating_budget_atomic"]),

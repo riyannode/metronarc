@@ -292,6 +292,7 @@ def execute(args: argparse.Namespace) -> object:
             if not goal: raise finance.DomainError("METRON_GOAL_NOT_FOUND")
             policy=dict(db.execute("SELECT * FROM policies WHERE goal_id=?",(args.id,)).fetchone())
             policy.pop("reserve_floor_atomic",None)
+            policy.pop("minimum_expected_roi_bps",None)
             return {"goal":dict(goal),"policy":policy}
         if operation=="spend-propose": return finance.propose_spend(db,data)
         if operation=="spend-approve": return finance.approve_spend(db,args.id or "")
