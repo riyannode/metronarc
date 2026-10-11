@@ -25,7 +25,7 @@ After installing the plugin:
 3. Configure `chain` and `operating_wallet`, authenticate the Circle Agent Wallet through Circle CLI, and fund that wallet directly.
 4. Create a goal from a JSON file with `goal-create --input path.json`.
 
-EconomicRegistry V1 is deprecated and removed from active runtime configuration. Shared EconomicRegistry V2 is active on Arc Testnet; users do not deploy or fund it. Configure and fund only the Circle operating wallet for normal payment operations.
+EconomicRegistry is METRON's shared non-custodial provenance contract on Arc Testnet at `0x547552585d8d995c5063820b2950e0db52b4cab4` (chain ID `5042002`). Users do not deploy or fund it. Configure and fund only the Circle operating wallet for normal payment operations.
 
 The repository marketplace uses the current portable root `plugin.json` format. Marketplace visibility and installation must be verified in the actual target client; parsing manifests alone is not installation verification.
 

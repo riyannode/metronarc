@@ -91,12 +91,10 @@ def build_dashboard(db) -> str:
         "ORDER BY e.rowid DESC LIMIT 10"
     ).fetchall()]
     tables["registry_records"]=[dict(row) for row in db.execute(
-        "SELECT registry_version,record_type,source_entity_id,chain,contract_address,status,provider_tx_ref,tx_hash,created_at,confirmed_at "
-        "FROM registry_records ORDER BY created_at DESC LIMIT 10"
+        "SELECT record_type,source_entity_id,chain,contract_address,status,tx_hash,confirmed_at "
+        "FROM registry_records WHERE chain=? AND contract_address=? ORDER BY created_at DESC LIMIT 10",
+        (status["economic_registry"]["chain"],status["economic_registry"]["contract_address"]),
     ).fetchall()]
-    for row in tables["registry_records"]:
-        if row["registry_version"] == "V1":
-            row["status"] = "DEPRECATED"
     for journal in tables["journal_entries"]:
         journal["lines"]=db.execute("SELECT account_code,debit_atomic,credit_atomic,currency FROM journal_lines WHERE journal_entry_id=?",(journal["id"],)).fetchall()
 
@@ -214,12 +212,12 @@ def build_dashboard(db) -> str:
     ],"No activity recorded yet.","activity"))
     registry_state=status["economic_registry"]
     registry_header=("<section class='panel' id='economic-registry'><div class='section-heading'><div><p class='eyebrow'>IMMUTABLE PROVENANCE</p>"
-        f"<h2>EconomicRegistry V2 · {html.escape(registry_state['activation_status'])}</h2></div></div>"
-        f"<p>Chain: {html.escape(registry_state['chain'])} · Contract: <span class='mono'>{html.escape(registry_state['contract_address'] or 'Pending V2 deployment')}</span></p>"
-        "<p class='note'>V1 is deprecated and receives no writes. This is a provenance mirror. SQLite, the journal, and authoritative Circle reconciliation remain business truth.</p></section>")
+        f"<h2>EconomicRegistry · {html.escape(registry_state['activation_status'])}</h2></div></div>"
+        f"<p>Chain: {html.escape(registry_state['chain'])} · Contract: <span class='mono'>{html.escape(registry_state['contract_address'])}</span></p>"
+        "<p class='note'>Non-custodial provenance mirror. SQLite, the journal, and authoritative Circle reconciliation remain business truth.</p></section>")
     sections.append(registry_header+table("Registry records",tables["registry_records"],[
-        ("Version","registry_version","text"),("Type","record_type","text"),("Source","source_entity_id","mono"),("Status","status","state"),
-        ("Chain","chain","text"),("Contract","contract_address","mono"),("Arc transaction","tx_hash","tx"),
+        ("Type","record_type","text"),("Source","source_entity_id","mono"),("Status","status","state"),
+        ("Arc transaction","tx_hash","tx"),
         ("Confirmed","confirmed_at","text"),
     ],"No reconciled provenance records yet.","registry-records"))
     template=DASHBOARD_TEMPLATE.read_text(encoding="utf-8")
