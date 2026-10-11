@@ -289,7 +289,12 @@ def execute(args: argparse.Namespace) -> object:
             if not wallet: raise finance.DomainError("METRON_WALLET_NOT_CONFIGURED")
             estimate=circle.service_estimate(intent["service_url"],wallet,chain(),body,intent["http_method"])
             circle.validate_service_estimate(estimate,intent["max_cost_atomic"],intent["payee_address"],chain(),intent["payment_scheme"])
-            balance=circle.usdc_balance_atomic(circle.wallet_balance(wallet,chain()))
+            if intent["payment_scheme"].lower()=="exact":
+                balance=circle.usdc_balance_atomic(circle.wallet_balance(wallet,chain()))
+            elif intent["payment_scheme"].lower()=="gatewaywalletbatched":
+                balance=circle.gateway_available_balance_atomic(circle.gateway_balance(wallet,chain()))
+            else:
+                raise circle.CircleError("METRON_UNSUPPORTED_PAYMENT_SCHEME")
             minimum=db.execute("SELECT minimum_wallet_balance_atomic FROM policies WHERE goal_id=?",(intent["goal_id"],)).fetchone()[0]
             if balance<intent["max_cost_atomic"]+minimum: raise finance.DomainError("METRON_MINIMUM_WALLET_BALANCE_VIOLATION")
             with store.transaction(db):
