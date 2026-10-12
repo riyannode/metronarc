@@ -323,10 +323,13 @@ def execute(args: argparse.Namespace) -> object:
             if not wallet: raise finance.DomainError("METRON_WALLET_NOT_CONFIGURED")
             estimate=circle.service_estimate(intent["service_url"],wallet,chain(),body,intent["http_method"])
             circle.validate_service_estimate(estimate,intent["max_cost_atomic"],intent["payee_address"],chain(),intent["payment_scheme"])
+            gateway_expected_sender=None
             if intent["payment_scheme"].lower()=="exact":
                 balance=circle.usdc_balance_atomic(circle.wallet_balance(wallet,chain()))
             elif intent["payment_scheme"].lower()=="gatewaywalletbatched":
-                balance=circle.gateway_available_balance_atomic(circle.gateway_balance(wallet,chain()))
+                gateway_state=circle.gateway_balance(wallet,chain())
+                balance=circle.gateway_available_balance_atomic(gateway_state)
+                gateway_expected_sender=circle.gateway_backing_eoa(gateway_state,wallet)
             else:
                 raise circle.CircleError("METRON_UNSUPPORTED_PAYMENT_SCHEME")
             minimum=db.execute("SELECT minimum_wallet_balance_atomic FROM policies WHERE goal_id=?",(intent["goal_id"],)).fetchone()[0]
@@ -350,7 +353,7 @@ def execute(args: argparse.Namespace) -> object:
                     authoritative=circle.gateway_x402_transfer(provider_ref,chain())
                 else:
                     authoritative=circle.find_transaction(circle.transactions(wallet,chain()),provider_ref)
-                record=finance.record_spend_result(db,intent_id,authoritative)
+                record=finance.record_spend_result(db,intent_id,authoritative,gateway_expected_sender)
                 if record["status"]=="FAILED":
                     return {"record":record,"service_response":metadata["response"]}
                 if record["status"]!="CONFIRMED": raise circle.CircleError("METRON_PAYMENT_AMBIGUOUS")
@@ -389,13 +392,14 @@ def execute(args: argparse.Namespace) -> object:
                 if not ref: raise finance.DomainError("METRON_PAYMENT_AMBIGUOUS")
                 if intent["provider_payment_id"] and args.provider_ref and intent["provider_payment_id"]!=args.provider_ref:
                     raise finance.DomainError("METRON_RECONCILIATION_MISMATCH")
-                if args.provider_ref:
-                    db.execute("UPDATE spend_intents SET provider_payment_id=? WHERE id=?",(args.provider_ref,args.id))
+                expected_sender=None
                 if (intent["executed_payment_scheme"] or intent["payment_scheme"]).lower()=="gatewaywalletbatched":
+                    gateway_state=circle.gateway_balance(wallet,chain())
+                    expected_sender=circle.gateway_backing_eoa(gateway_state,wallet)
                     payment=circle.gateway_x402_transfer(ref,chain())
                 else:
                     payment=circle.find_transaction(circle.transactions(wallet,chain()),ref)
-                record=finance.record_spend_result(db,args.id,payment)
+                record=finance.record_spend_result(db,args.id,payment,expected_sender)
                 if record.get("status")=="CONFIRMED":
                     record["registry"]=registry_after_spend(db,args.id)
                 return record

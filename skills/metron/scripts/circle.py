@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlparse
@@ -135,6 +136,15 @@ def wallet_balance(address: str, chain: str) -> dict:
 
 def gateway_balance(address: str, chain: str) -> dict:
     return call(["gateway","balance","--address",address,"--chain",chain])
+
+
+def gateway_backing_eoa(response: dict, address: str) -> str:
+    value=response.get("data") if isinstance(response,dict) else None
+    backing_eoa=value.get("backingEOA") if isinstance(value,dict) else None
+    wallet_address=value.get("address") if isinstance(value,dict) else None
+    if not _is_evm_address(address) or not _is_evm_address(wallet_address) or wallet_address.lower()!=address.lower() or not _is_evm_address(backing_eoa):
+        raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+    return backing_eoa
 
 
 def registry_query(signature: str, parameters: list[str], contract: str, chain: str) -> dict:
@@ -314,36 +324,73 @@ def gateway_x402_transfer(reference: str,chain: str) -> dict:
     hosts={"ARC-TESTNET":"https://gateway-api-testnet.circle.com","ARC":"https://gateway-api.circle.com"}
     host=hosts.get(chain.upper())
     if not host: raise CircleError("METRON_UNSUPPORTED_CHAIN")
-    request=Request(f"{host}/v1/x402/transfers/{quote(transfer_id,safe='')}",headers={"Accept":"application/json"})
-    try:
-        with urlopen(request,timeout=15) as response:
-            raw=response.read(65537)
-    except HTTPError as error:
-        if error.code==404: raise CircleError("METRON_PAYMENT_NOT_FOUND") from None
-        raise CircleError("METRON_GATEWAY_STATUS_UNAVAILABLE") from None
-    except (URLError,TimeoutError):
-        raise CircleError("METRON_GATEWAY_STATUS_UNAVAILABLE") from None
+    url=f"{host}/v1/x402/transfers/{quote(transfer_id,safe='')}"
+    curl_executable=os.environ.get("METRON_GATEWAY_STATUS_CURL_EXE")
+    if curl_executable:
+        try:
+            response=subprocess.run(
+                [curl_executable,"--silent","--show-error","--no-insecure","--no-location","--proto","=https","--retry","0","--connect-timeout","10","--max-time","15","--write-out","\\n%{http_code}","--header","Accept: application/json",url],
+                check=False,capture_output=True,stdin=subprocess.DEVNULL,timeout=20,env=circle_environment(),shell=False,
+            )
+        except (OSError,subprocess.SubprocessError):
+            raise CircleError("METRON_GATEWAY_STATUS_UNAVAILABLE") from None
+        if response.returncode:
+            raise CircleError("METRON_GATEWAY_STATUS_UNAVAILABLE")
+        raw,separator,status=response.stdout.rpartition(b"\n")
+        if not separator or len(status)!=3 or not status.isdigit():
+            raise CircleError("METRON_GATEWAY_STATUS_UNAVAILABLE")
+        status_code=int(status)
+        if status_code==404:
+            raise CircleError("METRON_PAYMENT_NOT_FOUND")
+        if status_code!=200:
+            raise CircleError("METRON_GATEWAY_STATUS_UNAVAILABLE")
+    else:
+        request=Request(url,headers={"Accept":"application/json"})
+        try:
+            with urlopen(request,timeout=15) as response:
+                raw=response.read(65537)
+        except HTTPError as error:
+            if error.code==404: raise CircleError("METRON_PAYMENT_NOT_FOUND") from None
+            raise CircleError("METRON_GATEWAY_STATUS_UNAVAILABLE") from None
+        except (URLError,TimeoutError):
+            raise CircleError("METRON_GATEWAY_STATUS_UNAVAILABLE") from None
     if len(raw)>65536: raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
     try:
         value=json.loads(raw)
     except (UnicodeDecodeError,json.JSONDecodeError):
         raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED") from None
-    return normalize_gateway_x402_transfer(value,transfer_id)
+    return normalize_gateway_x402_transfer(value,transfer_id,chain)
 
 
-def normalize_gateway_x402_transfer(record: dict,expected_id: str | None=None) -> dict:
+def normalize_gateway_x402_transfer(record: dict,expected_id: str | None=None,expected_chain: str | None=None) -> dict:
     if not isinstance(record,dict): raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
     transfer_id=record.get("id"); status=record.get("status")
     amount=record.get("amount"); token=record.get("token")
-    network=record.get("sendingNetwork"); sender=record.get("fromAddress"); recipient=record.get("toAddress")
-    if not isinstance(transfer_id,str) or expected_id and transfer_id!=expected_id or status not in {"received","batched","confirmed","completed","failed"} or token!="USDC" or not isinstance(network,str) or not isinstance(amount,str) or not amount.isdecimal() or not isinstance(sender,str) or not isinstance(recipient,str):
+    network=record.get("sendingNetwork"); recipient_network=record.get("recipientNetwork")
+    sender=record.get("fromAddress"); recipient=record.get("toAddress")
+    if not isinstance(transfer_id,str) or expected_id and transfer_id!=expected_id or status not in {"received","batched","confirmed","completed","failed"} or token!="USDC" or not isinstance(network,str) or not isinstance(recipient_network,str) or not isinstance(amount,str) or not amount.isdecimal() or not _is_evm_address(sender) or not _is_evm_address(recipient):
+        raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+    try:
+        if str(UUID(transfer_id))!=transfer_id.lower(): raise ValueError
+    except ValueError:
+        raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED") from None
+    nonce=record.get("nonce")
+    if not isinstance(nonce,str) or re.fullmatch(r"0x[0-9a-fA-F]{64}",nonce) is None:
+        raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+    timestamps=(record.get("createdAt"),record.get("updatedAt"))
+    try:
+        parsed_timestamps=[datetime.fromisoformat(value.replace("Z","+00:00")) for value in timestamps if isinstance(value,str)]
+    except ValueError:
+        raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED") from None
+    if len(parsed_timestamps)!=2 or any(value.tzinfo is None for value in parsed_timestamps):
         raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
     networks={"eip155:5042002":"ARC-TESTNET","eip155:5042":"ARC"}
-    chain=networks.get(network)
-    if not chain: raise CircleError("METRON_UNSUPPORTED_CHAIN")
+    sending_chain=networks.get(network); receiving_chain=networks.get(recipient_network)
+    if not sending_chain or not receiving_chain: raise CircleError("METRON_UNSUPPORTED_CHAIN")
+    if sending_chain!=receiving_chain or expected_chain and sending_chain!=expected_chain.upper(): raise CircleError("METRON_UNSUPPORTED_CHAIN")
     tx_hash=record.get("txHash")
-    if tx_hash is not None and not isinstance(tx_hash,str): raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
-    return {"provider":"CIRCLE","provider_ref":transfer_id,"status":status,"direction":"OUT","amount_atomic":_atomic_from_provider(amount,direct=True),"currency":"USDC","to_address":recipient,"from_address":sender,"tx_hash":tx_hash,"chain":chain,"raw_evidence_hash":hashlib.sha256(json.dumps(record,sort_keys=True,separators=(",",":"),default=str).encode()).hexdigest()}
+    if tx_hash is not None and (not isinstance(tx_hash,str) or re.fullmatch(r"0x[0-9a-fA-F]{64}",tx_hash) is None): raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+    return {"provider":"CIRCLE","provider_ref":transfer_id,"evidence_type":"CIRCLE_GATEWAY_X402_TRANSFER","status":status,"direction":"OUT","amount_atomic":_atomic_from_provider(amount,direct=True),"currency":"USDC","to_address":recipient,"from_address":sender,"tx_hash":tx_hash,"chain":sending_chain,"raw_evidence_hash":hashlib.sha256(json.dumps(record,sort_keys=True,separators=(",",":"),default=str).encode()).hexdigest()}
 
 
 def contract_addresses(category: str, chain: str) -> dict:

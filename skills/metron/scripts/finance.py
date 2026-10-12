@@ -210,21 +210,37 @@ def enforce_dispatch_limits(db: sqlite3.Connection, intent: sqlite3.Row) -> dict
     return None
 
 
-def record_spend_result(db: sqlite3.Connection, intent_id: str, result: dict) -> dict:
+def record_spend_result(db: sqlite3.Connection, intent_id: str, result: dict, expected_sender: str | None=None) -> dict:
     timestamp=now()
     with store.transaction(db):
         intent=db.execute("SELECT * FROM spend_intents WHERE id=?",(intent_id,)).fetchone()
         if intent is None: raise DomainError("METRON_SPEND_NOT_FOUND")
         if intent["status"] not in {"SUBMITTED","UNKNOWN"} or intent["policy_result"] not in {"ALLOW","ESCALATE"}: raise DomainError("METRON_SPEND_DENIED")
-        amount=int(result.get("amount_atomic",-1))
-        ref=str(result.get("provider_ref", ""))
+        result=result if isinstance(result,dict) else {}
+        amount=result.get("amount_atomic")
+        ref=result.get("provider_ref")
         config=store.read_config()
-        if result.get("status")=="failed" and ref:
-            db.execute("UPDATE spend_intents SET status='FAILED',provider_payment_id=?,executed_at=? WHERE id=?",(ref,timestamp,intent_id))
+        sender=expected_sender if expected_sender is not None else config.get("operating_wallet")
+        is_address=lambda value: isinstance(value,str) and len(value)==42 and value.startswith("0x") and all(ch in "0123456789abcdefABCDEF" for ch in value[2:])
+        valid_identity=(
+            isinstance(ref,str) and bool(ref) and (not intent["provider_payment_id"] or ref==intent["provider_payment_id"])
+            and isinstance(amount,int) and not isinstance(amount,bool) and 0<amount<=intent["max_cost_atomic"]
+            and (intent["provider_amount_atomic"] is None or amount==intent["provider_amount_atomic"])
+            and result.get("provider")==intent["provider"] and result.get("currency")=="USDC"
+            and result.get("direction") in ("OUT","OUTBOUND") and is_address(sender)
+            and is_address(result.get("to_address")) and result["to_address"].lower()==intent["payee_address"].lower()
+            and is_address(result.get("from_address")) and result["from_address"].lower()==sender.lower()
+            and result.get("chain")==config.get("chain","ARC-TESTNET")
+        )
+        if result.get("status")=="failed" and valid_identity:
+            db.execute("UPDATE spend_intents SET status='FAILED',provider_payment_id=COALESCE(provider_payment_id,?),executed_at=? WHERE id=?",(ref,timestamp,intent_id))
             store.event(db,"SPEND_FAILED","spend_intent",intent_id,"Circle confirmed the x402 transfer failed",{"provider_ref":ref},timestamp)
             return {"id":intent_id,"status":"FAILED"}
-        if not ref or amount < 0 or amount > intent["max_cost_atomic"] or intent["provider_amount_atomic"] is not None and amount!=intent["provider_amount_atomic"] or result.get("status") not in ("confirmed","complete","completed") or result.get("currency") != "USDC" or result.get("direction") not in ("OUT","OUTBOUND") or str(result.get("to_address","")).lower()!=intent["payee_address"].lower() or str(result.get("from_address","")).lower()!=str(config.get("operating_wallet","")).lower() or result.get("chain")!=config.get("chain","ARC-TESTNET"):
-            db.execute("UPDATE spend_intents SET status='UNKNOWN',executed_at=? WHERE id=?",(timestamp,intent_id))
+        if not valid_identity or result.get("status") not in ("confirmed","complete","completed"):
+            if valid_identity and not intent["provider_payment_id"]:
+                db.execute("UPDATE spend_intents SET status='UNKNOWN',provider_payment_id=?,executed_at=? WHERE id=?",(ref,timestamp,intent_id))
+            else:
+                db.execute("UPDATE spend_intents SET status='UNKNOWN',executed_at=? WHERE id=?",(timestamp,intent_id))
             store.event(db,"PAYMENT_AMBIGUOUS","spend_intent",intent_id,"Circle result was not confirmed within approved bounds",{},timestamp)
             return {"id":intent_id,"status":"UNKNOWN"}
         entry_id=store.next_id(db,"payment_entries","PE")
