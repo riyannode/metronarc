@@ -4,7 +4,7 @@
 
 > An agent should earn the right to spend more capital by proving that previous spending generated revenue.
 
-METRON is one skill-first plugin for Codex and compatible local AI hosts. `metron-policy` owns economic decisions and the finance CLI; `metron-email` autonomously operates customer conversations through the host's connected email and discovery tools. Both use the same local SQLite state. METRON does not bundle an email transport, host an LLM, provide an MCP server, or run a remote backend.
+METRON is one plugin with three skills for Codex and compatible local AI hosts. `metron-policy` owns economic decisions and the finance CLI; `metron-email` autonomously operates customer conversations through the host's connected email and discovery tools; `metron-invoice` renders private PDF documents from persisted posted invoice data. All skills use the same local METRON state. METRON does not bundle an email transport, host an LLM, provide an MCP server, or run a remote backend.
 
 ```mermaid
 flowchart LR
@@ -22,7 +22,7 @@ Circle Terms are never inferred from METRON use; see [Circle setup](docs/INSTALL
 
 ## Local quickstart
 
-Requirements: Python 3.11+, Circle CLI for provider operations, and Foundry for contract build/tests.
+Requirements: Python 3.11+, Bun for invoice PDF rendering, Circle CLI for provider operations, and Foundry for contract build/tests.
 
 ```sh
 python3 -B skills/metron-policy/scripts/run.py init
@@ -78,6 +78,8 @@ Expected value is not required to authorize an x402 spend. Hard spending limits 
 Realized ROI is calculated only after outcomes are recorded, from confirmed outgoing x402 Payment Entries and reconciled incoming customer Payment Entries for PAID invoices belonging to the goal. Its formula is `(reconciled collected revenue - confirmed spend) / confirmed spend`; it is undefined when confirmed spend is zero. Expected value, quoted deal amounts, open invoices, customer promises, unconfirmed payments, and registry state are not used.
 
 Below-minimum deals, deals marked `custom_or_legal_terms: true`, and deals with non-payer-wallet terms require pre-acceptance human approval. Customer acceptance always moves the deal to `PENDING_HUMAN`; a distinct final approval is required before invoice creation.
+
+After that final approval, the local finance CLI creates and posts one invoice per deal. The `metron-invoice` skill renders the persisted invoice to a private PDF; `metron-email` can deliver it in the existing customer thread using durable invoice-specific send state. See [Invoice documents](docs/INVOICES.md) for the required branding configuration and idempotency behavior.
 
 ## Scope and limitations
 

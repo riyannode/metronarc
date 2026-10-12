@@ -25,7 +25,17 @@ jobs:
       - name: Compile Python and validate manifests
         run: |
           python -m py_compile skills/metron-policy/scripts/*.py
-          python -c 'import json; from pathlib import Path; json.load(open("plugin.json")); json.load(open(".agents/plugins/marketplace.json")); assert {p.parent.name for p in Path("skills").glob("*/SKILL.md")} == {"metron-policy", "metron-email"}'
+          python -c 'import json; from pathlib import Path; plugin=json.load(open("plugin.json")); json.load(open(".agents/plugins/marketplace.json")); assert plugin["version"] == "0.2.0"; assert {p.parent.name for p in Path("skills").glob("*/SKILL.md")} == {"metron-policy", "metron-email", "metron-invoice"}'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - name: Validate invoice renderer and isolated lifecycle
+        run: |
+          cd skills/metron-invoice
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun test
+          python3 -B tests/test_workflow.py -v
       - name: Isolated CLI smoke
         run: |
           state="$(mktemp -d)"

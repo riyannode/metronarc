@@ -73,6 +73,11 @@ The CLI returns stable codes in `{"ok":false,"error":{"code":...,"message":...}}
 | `METRON_RECONCILIATION_MISMATCH` | State, direction, currency, amount, destination, invoice, or evidence did not match. |
 | `METRON_INVOICE_NOT_OPEN` | Invoice cannot be posted or reconciled in its current state. |
 | `METRON_INVOICE_NOT_FOUND` | The requested invoice ID does not exist. |
+| `METRON_INVOICE_DUE_DATE_REQUIRED` | An approved deal must include an agreed due date before METRON can create or post its invoice. |
+| `METRON_INVOICE_POSTING_INVALID` | An open or paid invoice has no persisted sales-invoice journal; stop and inspect the ledger before continuing. |
+| `METRON_INVOICE_NOT_POSTED` | Invoice email delivery requires the existing posted, unpaid invoice. |
+| `METRON_INVOICE_DOCUMENT_INVALID` | Required issuer, customer, approved service, due date, Arc Testnet recipient, or exact amount data is missing or invalid. Do not invent document values. |
+| `METRON_INVOICE_DOCUMENT_CONFLICT` | An existing invoice PDF or its source commitment differs from the persisted invoice. Do not overwrite or resend it. |
 | `METRON_HUMAN_APPROVAL_REQUIRED` | The deal has not passed its required human approval gate. |
 | `METRON_JOURNAL_UNBALANCED` | Accounting lines did not balance; transaction was rolled back. |
 | `METRON_LEGACY_INTERNAL_TRANSFER_UNSUPPORTED` | This old internal vault/reserve transfer is retained as history and cannot be reconciled through current runtime operations. |

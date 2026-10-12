@@ -80,6 +80,27 @@ def _conversation(db: sqlite3.Connection, account: str, conversation_id: str) ->
     return row
 
 
+def _invoice_for_delivery(db: sqlite3.Connection, invoice_id: str, conversation: sqlite3.Row, recipient: str) -> sqlite3.Row:
+    row = db.execute(
+        "SELECT i.id,i.deal_id,i.status,d.status AS deal_status,c.external_ref "
+        "FROM sales_invoices i JOIN deals d ON d.id=i.deal_id JOIN counterparties c ON c.id=i.counterparty_id WHERE i.id=?",
+        (invoice_id,),
+    ).fetchone()
+    if row is None:
+        raise finance.DomainError("METRON_INVOICE_NOT_FOUND")
+    if row["status"] != "OPEN" or row["deal_status"] != "INVOICED":
+        raise finance.DomainError("METRON_INVOICE_NOT_POSTED")
+    if conversation["deal_id"] != row["deal_id"]:
+        raise finance.DomainError("METRON_EMAIL_IDENTITY_MISMATCH")
+    try:
+        verified_recipient = _email({"recipient_email": row["external_ref"]}, "recipient_email")
+    except finance.DomainError:
+        raise finance.DomainError("METRON_EMAIL_IDENTITY_MISMATCH") from None
+    if recipient != verified_recipient:
+        raise finance.DomainError("METRON_EMAIL_IDENTITY_MISMATCH")
+    return row
+
+
 def _is_suppressed(db: sqlite3.Connection, account: str, recipient: str) -> bool:
     return db.execute(
         "SELECT 1 FROM email_contact_suppressions WHERE account_email=? AND recipient_email=?",
@@ -375,7 +396,7 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
             return {"status": "FAILED", "error_code": error}
 
     if action == "send-prepare":
-        _input(data, {"action", "account_email", "owner_token", "conversation_id", "action_key", "action_kind", "source_message_id", "recipient_email", "content_sha256"},
+        _input(data, {"action", "account_email", "owner_token", "conversation_id", "action_key", "action_kind", "source_message_id", "invoice_id", "recipient_email", "content_sha256"},
                {"action", "account_email", "owner_token", "conversation_id", "action_key", "action_kind", "recipient_email", "content_sha256"})
         account = _email(data, "account_email")
         owner = _text(data, "owner_token", 128)
@@ -383,11 +404,12 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
         key = _text(data, "action_key", 512)
         kind = data.get("action_kind")
         source = _text(data, "source_message_id", 512) if data.get("source_message_id") is not None else None
+        invoice_id = _text(data, "invoice_id", 64) if data.get("invoice_id") is not None else None
         recipient = _email(data, "recipient_email")
         content_hash = _text(data, "content_sha256", 64).lower()
-        if kind not in {"OUTREACH", "REPLY", "FOLLOW_UP"} or not re.fullmatch(r"[0-9a-f]{64}", content_hash):
+        if kind not in {"OUTREACH", "REPLY", "FOLLOW_UP", "INVOICE"} or not re.fullmatch(r"[0-9a-f]{64}", content_hash):
             raise finance.DomainError("METRON_INVALID_INPUT")
-        if (kind == "OUTREACH" and (source is not None or not key.startswith("outreach:"))) or (kind == "REPLY" and (source is None or key != f"reply:{source}")) or (kind == "FOLLOW_UP" and (source is None or key != f"follow-up:{source}")):
+        if (kind == "OUTREACH" and (source is not None or invoice_id is not None or not key.startswith("outreach:"))) or (kind == "REPLY" and (source is None or invoice_id is not None or key != f"reply:{source}")) or (kind == "FOLLOW_UP" and (source is None or invoice_id is not None or key != f"follow-up:{source}")) or (kind == "INVOICE" and (source is not None or invoice_id is None or key != f"invoice:{invoice_id}")):
             raise finance.DomainError("METRON_INVALID_INPUT")
         with store.transaction(db):
             _lock(db, account, owner)
@@ -396,6 +418,14 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
                 raise finance.DomainError("METRON_EMAIL_IDENTITY_MISMATCH")
             if conversation["state"] == "OPTED_OUT" or _is_suppressed(db, account, recipient):
                 raise finance.DomainError("METRON_EMAIL_OPTED_OUT")
+            if kind == "INVOICE":
+                _invoice_for_delivery(db, invoice_id or "", conversation, recipient)
+                other_account = db.execute(
+                    "SELECT account_email FROM email_send_attempts WHERE invoice_id=? AND action_kind='INVOICE'",
+                    (invoice_id,),
+                ).fetchone()
+                if other_account is not None and other_account["account_email"] != account:
+                    raise finance.DomainError("METRON_EMAIL_ACTION_CONFLICT")
             if kind == "REPLY":
                 inbound = db.execute(
                     "SELECT 1 FROM email_messages WHERE account_email=? AND gmail_message_id=? AND conversation_id=? AND direction='INBOUND'",
@@ -419,7 +449,7 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
                 "SELECT * FROM email_send_attempts WHERE account_email=? AND action_key=?", (account, key)
             ).fetchone()
             if existing:
-                if (existing["conversation_id"], existing["action_kind"], existing["source_message_id"], existing["recipient_email"], existing["content_sha256"]) != (conversation_id, kind, source, recipient, content_hash):
+                if (existing["conversation_id"], existing["action_kind"], existing["source_message_id"], existing["invoice_id"], existing["recipient_email"], existing["content_sha256"]) != (conversation_id, kind, source, invoice_id, recipient, content_hash):
                     raise finance.DomainError("METRON_EMAIL_ACTION_CONFLICT")
                 if existing["status"] in {"SUBMITTING", "UNKNOWN"}:
                     raise finance.DomainError("METRON_EMAIL_SEND_UNRESOLVED")
@@ -433,9 +463,9 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
                 raise finance.DomainError("METRON_EMAIL_ACTION_CONFLICT")
             attempt_id = str(uuid.uuid4())
             db.execute(
-                "INSERT INTO email_send_attempts(id,account_email,action_key,conversation_id,action_kind,source_message_id,recipient_email,content_sha256,status,created_at,updated_at) "
-                "VALUES (?,?,?,?,?,?,?,?,'PREPARED',datetime('now'),datetime('now'))",
-                (attempt_id, account, key, conversation_id, kind, source, recipient, content_hash),
+                "INSERT INTO email_send_attempts(id,account_email,action_key,conversation_id,action_kind,invoice_id,source_message_id,recipient_email,content_sha256,status,created_at,updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,'PREPARED',datetime('now'),datetime('now'))",
+                (attempt_id, account, key, conversation_id, kind, invoice_id, source, recipient, content_hash),
             )
             return {"status": "PREPARED", "attempt_id": attempt_id, "duplicate": False}
 
@@ -464,6 +494,8 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
                 if conversation["state"] == "OPTED_OUT" or _is_suppressed(db, account, attempt["recipient_email"]):
                     db.execute("UPDATE email_send_attempts SET status='FAILED',updated_at=datetime('now'),error_code='METRON_EMAIL_OPTED_OUT' WHERE id=?", (attempt["id"],))
                     return {"status": "FAILED", "attempt_id": attempt["id"], "error_code": "METRON_EMAIL_OPTED_OUT"}
+                if attempt["action_kind"] == "INVOICE":
+                    _invoice_for_delivery(db, attempt["invoice_id"], conversation, attempt["recipient_email"])
                 configured_limit = db.execute(
                     "SELECT max_outbound_per_24h FROM email_account_limits WHERE account_email=?", (account,)
                 ).fetchone()
@@ -534,7 +566,7 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
             (account,),
         ).fetchall()]
         attempts = [dict(row) for row in db.execute(
-            "SELECT id,action_key,conversation_id,action_kind,source_message_id,recipient_email,status,gmail_message_id,gmail_thread_id,error_code,updated_at FROM email_send_attempts WHERE account_email=? ORDER BY updated_at DESC LIMIT 200",
+            "SELECT id,action_key,conversation_id,action_kind,invoice_id,source_message_id,recipient_email,status,gmail_message_id,gmail_thread_id,error_code,updated_at FROM email_send_attempts WHERE account_email=? ORDER BY updated_at DESC LIMIT 200",
             (account,),
         ).fetchall()]
         suppressed = [dict(row) for row in db.execute(

@@ -1,6 +1,6 @@
 {
   "name": "metron-local",
-  "interface": { "displayName": "METRON Local — Policy and Email" },
+  "interface": { "displayName": "METRON Local — Policy, Email, and Invoices" },
   "plugins": [
     {
       "name": "metron",

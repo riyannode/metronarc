@@ -4,7 +4,7 @@ import hashlib
 import json
 import sqlite3
 import ipaddress
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlparse
 
@@ -369,7 +369,21 @@ def create_invoice(db: sqlite3.Connection, deal_id: str, due_at: str | None) -> 
     with store.transaction(db):
         deal=db.execute("SELECT * FROM deals WHERE id=?",(deal_id,)).fetchone()
         if deal is None: raise DomainError("METRON_DEAL_NOT_FOUND")
+        existing=db.execute("SELECT id,status FROM sales_invoices WHERE deal_id=?",(deal_id,)).fetchone()
+        if existing is not None:
+            return {"id":existing["id"],"status":existing["status"],"existing":True}
         if deal["status"] != "HUMAN_APPROVED": raise DomainError("METRON_HUMAN_APPROVAL_REQUIRED")
+        terms=json.loads(deal["terms_json"])
+        agreed_due_at=terms.get("due_at")
+        if due_at is not None and due_at != agreed_due_at: raise DomainError("METRON_INVALID_INPUT")
+        due_at=agreed_due_at
+        if not isinstance(due_at,str) or not due_at.strip():
+            raise DomainError("METRON_INVOICE_DUE_DATE_REQUIRED")
+        try:
+            parsed_due_date=date.fromisoformat(due_at)
+        except ValueError:
+            raise DomainError("METRON_INVALID_INPUT") from None
+        if parsed_due_date.isoformat()!=due_at: raise DomainError("METRON_INVALID_INPUT")
         invoice=store.next_id(db,"sales_invoices","INV")
         db.execute("INSERT INTO sales_invoices(id,deal_id,counterparty_id,amount_atomic,currency,status,due_at) VALUES (?,?,?,?,?,'DRAFT',?)",(invoice,deal_id,deal["counterparty_id"],deal["amount_atomic"],deal["currency"],due_at))
         store.event(db,"INVOICE_CREATED","sales_invoice",invoice,"Draft invoice created after human approval",{"deal_id":deal_id},now())
@@ -381,13 +395,55 @@ def post_invoice(db: sqlite3.Connection, invoice_id: str) -> dict:
     with store.transaction(db):
         invoice=db.execute("SELECT * FROM sales_invoices WHERE id=?",(invoice_id,)).fetchone()
         if invoice is None: raise DomainError("METRON_INVOICE_NOT_FOUND")
+        if invoice["status"] in {"OPEN","PAID"}:
+            journal=db.execute("SELECT id FROM journal_entries WHERE source_type='SALES_INVOICE' AND source_id=?",(invoice_id,)).fetchone()
+            if journal is None: raise DomainError("METRON_INVOICE_POSTING_INVALID")
+            return {"id":invoice_id,"status":invoice["status"],"journal_id":journal["id"],"existing":True}
         if invoice["status"] != "DRAFT": raise DomainError("METRON_INVOICE_NOT_OPEN")
+        deal=db.execute("SELECT status FROM deals WHERE id=?",(invoice["deal_id"],)).fetchone()
+        if deal is None or deal["status"]!="HUMAN_APPROVED": raise DomainError("METRON_HUMAN_APPROVAL_REQUIRED")
+        if not invoice["due_at"]: raise DomainError("METRON_INVOICE_DUE_DATE_REQUIRED")
         db.execute("UPDATE sales_invoices SET status='POSTED',issued_at=? WHERE id=?",(timestamp,invoice_id))
         journal=post_journal(db,"SALES_INVOICE",invoice_id,"Sales invoice posted","1100","4000",invoice["amount_atomic"],invoice["currency"],timestamp)
         db.execute("UPDATE sales_invoices SET status='OPEN' WHERE id=?",(invoice_id,))
         db.execute("UPDATE deals SET status='INVOICED' WHERE id=?",(invoice["deal_id"],))
         store.event(db,"INVOICE_POSTED","sales_invoice",invoice_id,"Invoice posted and receivable recognized",{"journal_id":journal},timestamp)
     return {"id":invoice_id,"status":"OPEN","journal_id":journal}
+
+
+def get_invoice(db: sqlite3.Connection, invoice_id: str) -> dict:
+    row=db.execute(
+        "SELECT i.*,d.status AS deal_status,d.terms_json,c.name AS customer_name,c.external_ref AS customer_external_ref "
+        "FROM sales_invoices i JOIN deals d ON d.id=i.deal_id JOIN counterparties c ON c.id=i.counterparty_id WHERE i.id=?",
+        (invoice_id,),
+    ).fetchone()
+    if row is None: raise DomainError("METRON_INVOICE_NOT_FOUND")
+    terms=json.loads(row["terms_json"])
+    billing_email=row["customer_external_ref"]
+    term_email=terms.get("billing_email")
+    if term_email is not None and (not isinstance(term_email,str) or not isinstance(billing_email,str) or term_email.strip().lower()!=billing_email.strip().lower()):
+        raise DomainError("METRON_EMAIL_IDENTITY_MISMATCH")
+    invoice={key:row[key] for key in ("id","deal_id","counterparty_id","amount_atomic","currency","status","issued_at","due_at","paid_at")}
+    allowed_terms=("service_description","line_items","tax_atomic","fee_atomic","billing_name","billing_email","billing_address")
+    document_terms={key:terms[key] for key in allowed_terms if key in terms}
+    for key in ("tax_atomic","fee_atomic"):
+        if key in document_terms and isinstance(document_terms[key],int) and not isinstance(document_terms[key],bool):
+            document_terms[key]=str(document_terms[key])
+    if isinstance(document_terms.get("line_items"),list):
+        for item in document_terms["line_items"]:
+            if isinstance(item,dict):
+                for key in ("unit_price_atomic","quantity"):
+                    if isinstance(item.get(key),int) and not isinstance(item[key],bool):
+                        item[key]=str(item[key])
+    config=store.read_config()
+    document_invoice={**invoice,"amount_atomic":str(invoice["amount_atomic"])}
+    return {
+        **invoice,
+        "invoice":document_invoice,
+        "customer":{"name":terms.get("billing_name") or row["customer_name"],"email":billing_email,"billing_address":terms.get("billing_address")},
+        "deal":{"id":row["deal_id"],"status":row["deal_status"],"terms":document_terms},
+        "business":{"operating_wallet":config.get("operating_wallet"),"chain":config.get("chain","ARC-TESTNET")},
+    }
 
 
 def reconcile_invoice(db: sqlite3.Connection, invoice_id: str, evidence: dict) -> dict:

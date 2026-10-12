@@ -387,9 +387,7 @@ def execute(args: argparse.Namespace) -> object:
         if operation=="invoice-create": return finance.create_invoice(db,args.id or "",data.get("due_at"))
         if operation=="invoice-post": return finance.post_invoice(db,args.id or "")
         if operation=="invoice-get":
-            row=db.execute("SELECT * FROM sales_invoices WHERE id=?",(args.id or "",)).fetchone()
-            if not row: raise finance.DomainError("METRON_INVOICE_NOT_FOUND")
-            return dict(row)
+            return finance.get_invoice(db,args.id or "")
         if operation=="payment-sync":
             wallet=store.read_config().get("operating_wallet")
             if not wallet: raise finance.DomainError("METRON_WALLET_NOT_CONFIGURED")

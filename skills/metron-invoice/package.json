@@ -1,0 +1,19 @@
+{
+  "name": "@metron/invoice-renderer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "render": "bun run src/render.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@pdfme/common": "6.2.4",
+    "@pdfme/generator": "6.2.4",
+    "@pdfme/schemas": "6.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "typescript": "5.9.3"
+  }
+}
