@@ -587,7 +587,7 @@ def normalize_transaction(record: dict) -> dict:
     if isinstance(chain,dict): chain=_first(chain,("name","id"))
     if not provider_ref or amount is None:
         raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
-    return {"provider":"CIRCLE","provider_ref":str(provider_ref),"status":status,"direction":direction,"amount_atomic":_atomic_from_provider(amount,direct),"currency":asset,"to_address":to_address,"from_address":from_address,"tx_hash":tx_hash,"chain":chain,"raw_evidence_hash":hashlib.sha256(json.dumps(record,sort_keys=True,separators=(",",":"),default=str).encode()).hexdigest()}
+    return {"provider":"CIRCLE","provider_ref":str(provider_ref),"evidence_type":"CIRCLE_TRANSACTION","status":status,"direction":direction,"amount_atomic":_atomic_from_provider(amount,direct),"currency":asset,"to_address":to_address,"from_address":from_address,"tx_hash":tx_hash,"chain":chain,"raw_evidence_hash":hashlib.sha256(json.dumps(record,sort_keys=True,separators=(",",":"),default=str).encode()).hexdigest()}
 
 
 def records(response: dict) -> list[dict]:
