@@ -344,8 +344,7 @@ def execute(args: argparse.Namespace) -> object:
                 metadata=circle.service_payment_metadata(response)
                 provider_amount=metadata["amount_atomic"]
                 set_spend_unknown(intent_id,provider_ref,provider_amount,"PAYMENT_REFERENCE_RECORDED",metadata["scheme"])
-                if metadata["amount_atomic"]>intent["max_cost_atomic"] or metadata["seller"].lower()!=intent["payee_address"].lower() or metadata["chain"]!=chain() or metadata["scheme"].lower()!=intent["payment_scheme"].lower():
-                    raise circle.CircleError("METRON_PAYMENT_AMBIGUOUS")
+                circle.validate_service_payment_metadata(metadata,intent["max_cost_atomic"],intent["payee_address"],chain(),intent["payment_scheme"])
                 if not provider_ref: raise circle.CircleError("METRON_PAYMENT_AMBIGUOUS")
                 if metadata["scheme"].lower()=="gatewaywalletbatched":
                     authoritative=circle.gateway_x402_transfer(provider_ref,chain())
