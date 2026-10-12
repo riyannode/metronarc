@@ -7,13 +7,15 @@ import json
 import os
 from pathlib import Path
 import re
+import selectors
 import shutil
 import subprocess
+import time
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 from uuid import UUID
 
 
@@ -21,6 +23,14 @@ class CircleError(Exception):
     def __init__(self, code: str):
         self.code=code
         super().__init__(code)
+
+
+class _GatewayNoRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, message, headers, new_url):
+        return None
+
+
+GATEWAY_MAX_RESPONSE_BYTES=65536
 
 
 def executable() -> list[str]:
@@ -316,6 +326,82 @@ def transactions(address: str,chain: str,operation: str="transfer") -> dict:
     return call(["transaction","list","--address",address,"--chain",chain,"--operation",operation,"--limit","50"])
 
 
+def _gateway_curl_get(url: str,curl_executable: str,timeout: float=20) -> tuple[bytes,int]:
+    command=[curl_executable,"--silent","--no-insecure","--include","--suppress-connect-headers","--no-location","--retry","0","--no-fail","--request","GET","--output","-","--proto","=https","--connect-timeout","10","--max-time","15","--header","Accept: application/json",url]
+    process=None; selector=None; header_buffer=bytearray(); body=bytearray(); status_code=None
+    try:
+        process=subprocess.Popen(command,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,env=circle_environment(),shell=False,bufsize=0)
+        selector=selectors.DefaultSelector()
+        selector.register(process.stdout,selectors.EVENT_READ)
+        deadline=time.monotonic()+timeout
+        while selector.get_map():
+            remaining=deadline-time.monotonic()
+            if remaining<=0: raise CircleError("METRON_GATEWAY_STATUS_UNAVAILABLE")
+            events=selector.select(remaining)
+            if not events: raise CircleError("METRON_GATEWAY_STATUS_UNAVAILABLE")
+            for key,_ in events:
+                room=GATEWAY_MAX_RESPONSE_BYTES-len(body)
+                read_limit=min(4096,room+1) if status_code is not None else 4096
+                chunk=os.read(key.fileobj.fileno(),read_limit)
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                if status_code is not None:
+                    if len(chunk)>room: raise CircleError("METRON_GATEWAY_RESPONSE_TOO_LARGE")
+                    body.extend(chunk)
+                    continue
+                header_buffer.extend(chunk)
+                while status_code is None:
+                    separator=header_buffer.find(b"\r\n\r\n")
+                    separator_size=4
+                    if separator<0:
+                        separator=header_buffer.find(b"\n\n")
+                        separator_size=2
+                    if separator<0:
+                        if len(header_buffer)>16384: raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+                        break
+                    if separator>16384: raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+                    header_block=bytes(header_buffer[:separator])
+                    remainder=bytes(header_buffer[separator+separator_size:])
+                    header_buffer.clear()
+                    lines=header_block.splitlines()
+                    match=re.match(rb"^HTTP/\S+\s+([0-9]{3})(?:\s|$)",lines[0]) if lines else None
+                    if match is None: raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+                    response_status=int(match.group(1))
+                    if response_status in {100,103}:
+                        header_buffer.extend(remainder)
+                        if len(header_buffer)>16384: raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+                        continue
+                    status_code=response_status
+                    if status_code!=200:
+                        try: process.kill()
+                        except OSError: pass
+                        try: process.wait(timeout=1)
+                        except subprocess.TimeoutExpired: pass
+                        return b"",status_code
+                    if len(remainder)>GATEWAY_MAX_RESPONSE_BYTES: raise CircleError("METRON_GATEWAY_RESPONSE_TOO_LARGE")
+                    body.extend(remainder)
+        try:
+            return_code=process.wait(timeout=max(0,deadline-time.monotonic()))
+        except subprocess.TimeoutExpired:
+            raise CircleError("METRON_GATEWAY_STATUS_UNAVAILABLE") from None
+        if return_code: raise CircleError("METRON_GATEWAY_STATUS_UNAVAILABLE")
+        if status_code is None: raise CircleError("METRON_GATEWAY_STATUS_UNAVAILABLE")
+        return bytes(body),status_code
+    except CircleError:
+        raise
+    except (OSError,ValueError,subprocess.SubprocessError):
+        raise CircleError("METRON_GATEWAY_STATUS_UNAVAILABLE") from None
+    finally:
+        if process is not None and process.poll() is None:
+            try: process.kill()
+            except OSError: pass
+            try: process.wait(timeout=1)
+            except subprocess.TimeoutExpired: pass
+        if selector is not None: selector.close()
+        if process is not None and process.stdout is not None: process.stdout.close()
+
+
 def gateway_x402_transfer(reference: str,chain: str) -> dict:
     try:
         transfer_id=str(UUID(reference))
@@ -327,40 +413,28 @@ def gateway_x402_transfer(reference: str,chain: str) -> dict:
     url=f"{host}/v1/x402/transfers/{quote(transfer_id,safe='')}"
     curl_executable=os.environ.get("METRON_GATEWAY_STATUS_CURL_EXE")
     if curl_executable:
-        try:
-            response=subprocess.run(
-                [curl_executable,"--silent","--show-error","--no-insecure","--no-location","--proto","=https","--retry","0","--connect-timeout","10","--max-time","15","--write-out","\\n%{http_code}","--header","Accept: application/json",url],
-                check=False,capture_output=True,stdin=subprocess.DEVNULL,timeout=20,env=circle_environment(),shell=False,
-            )
-        except (OSError,subprocess.SubprocessError):
-            raise CircleError("METRON_GATEWAY_STATUS_UNAVAILABLE") from None
-        if response.returncode:
-            raise CircleError("METRON_GATEWAY_STATUS_UNAVAILABLE")
-        raw,separator,status=response.stdout.rpartition(b"\n")
-        if not separator or len(status)!=3 or not status.isdigit():
-            raise CircleError("METRON_GATEWAY_STATUS_UNAVAILABLE")
-        status_code=int(status)
-        if status_code==404:
-            raise CircleError("METRON_PAYMENT_NOT_FOUND")
-        if status_code!=200:
-            raise CircleError("METRON_GATEWAY_STATUS_UNAVAILABLE")
+        raw,status_code=_gateway_curl_get(url,curl_executable)
     else:
         request=Request(url,headers={"Accept":"application/json"})
         try:
-            with urlopen(request,timeout=15) as response:
-                raw=response.read(65537)
+            with build_opener(_GatewayNoRedirectHandler).open(request,timeout=15) as response:
+                status_code=response.status
+                raw=response.read(GATEWAY_MAX_RESPONSE_BYTES+1)
         except HTTPError as error:
+            if error.code==403: raise CircleError("METRON_GATEWAY_STATUS_FORBIDDEN") from None
             if error.code==404: raise CircleError("METRON_PAYMENT_NOT_FOUND") from None
             raise CircleError("METRON_GATEWAY_STATUS_UNAVAILABLE") from None
-        except (URLError,TimeoutError):
+        except (OSError,URLError,TimeoutError):
             raise CircleError("METRON_GATEWAY_STATUS_UNAVAILABLE") from None
-    if len(raw)>65536: raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+    if status_code==403: raise CircleError("METRON_GATEWAY_STATUS_FORBIDDEN")
+    if status_code==404: raise CircleError("METRON_PAYMENT_NOT_FOUND")
+    if status_code!=200: raise CircleError("METRON_GATEWAY_STATUS_UNAVAILABLE")
+    if len(raw)>GATEWAY_MAX_RESPONSE_BYTES: raise CircleError("METRON_GATEWAY_RESPONSE_TOO_LARGE")
     try:
         value=json.loads(raw)
     except (UnicodeDecodeError,json.JSONDecodeError):
         raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED") from None
     return normalize_gateway_x402_transfer(value,transfer_id,chain)
-
 
 def normalize_gateway_x402_transfer(record: dict,expected_id: str | None=None,expected_chain: str | None=None) -> dict:
     if not isinstance(record,dict): raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")

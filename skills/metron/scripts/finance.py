@@ -225,7 +225,7 @@ def record_spend_result(db: sqlite3.Connection, intent_id: str, result: dict, ex
         valid_identity=(
             isinstance(ref,str) and bool(ref) and (not intent["provider_payment_id"] or ref==intent["provider_payment_id"])
             and isinstance(amount,int) and not isinstance(amount,bool) and 0<amount<=intent["max_cost_atomic"]
-            and (intent["provider_amount_atomic"] is None or amount==intent["provider_amount_atomic"])
+            and intent["provider_amount_atomic"] is not None and amount==intent["provider_amount_atomic"]
             and result.get("provider")==intent["provider"] and result.get("currency")=="USDC"
             and result.get("direction") in ("OUT","OUTBOUND") and is_address(sender)
             and is_address(result.get("to_address")) and result["to_address"].lower()==intent["payee_address"].lower()

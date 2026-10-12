@@ -52,6 +52,8 @@ The CLI returns stable codes in `{"ok":false,"error":{"code":...,"message":...}}
 | `METRON_PAYMENT_AMBIGUOUS` | Preserve `UNKNOWN`; query authoritative Circle transaction history or x402 transfer status before any retry. |
 | `METRON_PAYMENT_NOT_FOUND` | Provider reference was not found in the authoritative Circle response. |
 | `METRON_GATEWAY_STATUS_UNAVAILABLE` | Circle's x402 transfer status API could not confirm the Gateway payment; preserve `UNKNOWN` and reconcile later. |
+| `METRON_GATEWAY_STATUS_FORBIDDEN` | Circle's x402 transfer API returned HTTP 403; preserve `UNKNOWN` and resolve endpoint access before retrying the read-only lookup. |
+| `METRON_GATEWAY_RESPONSE_TOO_LARGE` | Circle's x402 transfer response exceeded 64 KiB; preserve `UNKNOWN` and inspect the response contract before retrying the read-only lookup. |
 | `METRON_PAYMENT_ALREADY_CONSUMED` | Evidence reference was already linked to an entry. |
 | `METRON_RECONCILIATION_MISMATCH` | State, direction, currency, amount, destination, invoice, or evidence did not match. |
 | `METRON_INVOICE_NOT_OPEN` | Invoice cannot be posted or reconciled in its current state. |
