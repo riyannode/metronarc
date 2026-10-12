@@ -6,6 +6,7 @@ import ipaddress
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 from decimal import Decimal, InvalidOperation
@@ -252,20 +253,53 @@ def service_estimate(url: str,address: str,chain: str,data: dict | None=None,met
 
 def validate_service_estimate(response: dict, maximum_atomic: int, seller: str, chain: str, scheme: str) -> dict:
     if not isinstance(response,dict): raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+    if not isinstance(maximum_atomic,int) or isinstance(maximum_atomic,bool) or maximum_atomic<0: raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
     value=response.get("data",response)
     if not isinstance(value,dict): raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+    if "data" in response and any(key in response and (key not in value or response[key]!=value[key]) for key in ("price","chain","scheme","seller","asset","currency")):
+        raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
     price=value.get("price"); actual_chain=value.get("chain"); actual_scheme=value.get("scheme"); actual_seller=value.get("seller")
     if price is None or not all(isinstance(item,str) and item for item in (actual_chain,actual_scheme,actual_seller)):
         raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
-    amount_atomic=_atomic_from_provider(price)
+    amount_atomic=_estimate_price_atomic(price,value)
     if actual_scheme.lower() not in {"exact","gatewaywalletbatched"}: raise CircleError("METRON_UNSUPPORTED_PAYMENT_SCHEME")
     if actual_scheme.lower()!=scheme.lower(): raise CircleError("METRON_UNSUPPORTED_PAYMENT_SCHEME")
-    def normalize_chain(item: str) -> str:
-        return " ".join(item.lower().replace("-"," ").split())
-    expected_chain="arc testnet" if chain.lower() in {"arc-testnet","eip155:5042002"} else normalize_chain(chain)
-    if normalize_chain(actual_chain) != expected_chain or actual_seller.lower()!=seller.lower() or amount_atomic>maximum_atomic:
+    if not _is_arc_testnet_chain(actual_chain) or not _is_arc_testnet_chain(chain):
+        raise CircleError("METRON_SPEND_DENIED")
+    if not _is_evm_address(actual_seller) or not _is_evm_address(seller) or actual_seller.lower()!=seller.lower() or amount_atomic>maximum_atomic:
         raise CircleError("METRON_SPEND_DENIED")
     return {"amount_atomic":amount_atomic,"chain":actual_chain,"scheme":actual_scheme,"seller":actual_seller}
+
+
+def _estimate_price_atomic(price: str, estimate: dict) -> int:
+    if not isinstance(price,str): raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+    match=re.fullmatch(r"\s*\$?([0-9]+)(?:\.([0-9]+))?(?:\s+([A-Za-z][A-Za-z0-9]*))?\s*",price)
+    if not match: raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+    whole,fraction,price_asset=match.groups()
+    if len(whole)>13 or (fraction and len(fraction)>6): raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+    assets=[]
+    if price_asset:
+        assets.append(price_asset.upper())
+    for key in ("asset","currency"):
+        if key in estimate:
+            asset=estimate[key]
+            if not isinstance(asset,str) or not asset.strip(): raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+            assets.append(asset.strip().upper())
+    if not assets or len(set(assets))!=1: raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+    if assets[0]!="USDC": raise CircleError("METRON_SPEND_DENIED")
+    units=int(whole)*1_000_000+int((fraction or "").ljust(6,"0") or "0")
+    if units>2**63-1: raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+    return units
+
+
+def _is_arc_testnet_chain(value: str) -> bool:
+    if not isinstance(value,str): return False
+    normalized=value.strip().lower().replace("-"," ").replace("_"," ")
+    return normalized in {"arc testnet","eip155:5042002","5042002","0x4cef52"}
+
+
+def _is_evm_address(value: str) -> bool:
+    return isinstance(value,str) and re.fullmatch(r"0x[0-9a-fA-F]{40}",value) is not None
 
 
 def transactions(address: str,chain: str,operation: str="transfer") -> dict:
