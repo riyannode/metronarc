@@ -26,6 +26,8 @@ jobs:
         run: |
           python -m py_compile skills/metron/scripts/*.py
           python -c 'import json; json.load(open("plugin.json")); json.load(open(".agents/plugins/marketplace.json"))'
+      - name: Registry provenance fixtures
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
       - name: Isolated CLI smoke
         run: |
           state="$(mktemp -d)"

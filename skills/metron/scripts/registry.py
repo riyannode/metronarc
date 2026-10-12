@@ -63,28 +63,64 @@ def _context() -> tuple[str, str]:
 
 
 def _spend_fields(db: sqlite3.Connection, intent_id: str) -> dict:
-    row = db.execute(
-        "SELECT si.*,g.revenue_target_atomic,g.currency AS goal_currency,pe.id AS payment_entry_id,pe.status AS payment_status,"
-        "pe.direction,pe.amount_atomic,pe.currency AS payment_currency,ev.provider,ev.provider_ref,ev.chain,ev.tx_hash,"
-        "ev.from_address,ev.to_address,je.status AS journal_status "
+    rows = db.execute(
+        "SELECT si.*,g.revenue_target_atomic,g.currency AS goal_currency,"
+        "pe.id AS payment_entry_id,pe.status AS payment_status,pe.provider AS payment_provider,"
+        "pe.provider_payment_id AS payment_provider_ref,pe.direction,pe.amount_atomic,"
+        "pe.currency AS payment_currency,ev.id AS evidence_id,ev.provider AS evidence_provider,"
+        "ev.evidence_type,ev.provider_ref,ev.chain,ev.tx_hash,ev.from_address,ev.to_address,"
+        "ev.amount_atomic AS evidence_amount_atomic,ev.currency AS evidence_currency,"
+        "je.id AS journal_entry_id,je.status AS journal_status,"
+        "(SELECT COUNT(*) FROM journal_lines jl WHERE jl.journal_entry_id=je.id) AS journal_line_count,"
+        "(SELECT COALESCE(SUM(jl.debit_atomic),0) FROM journal_lines jl WHERE jl.journal_entry_id=je.id) AS journal_debit_atomic,"
+        "(SELECT COALESCE(SUM(jl.credit_atomic),0) FROM journal_lines jl WHERE jl.journal_entry_id=je.id) AS journal_credit_atomic,"
+        "(SELECT COUNT(*) FROM journal_lines jl WHERE jl.journal_entry_id=je.id AND jl.currency!='USDC') AS journal_non_usdc_count "
         "FROM spend_intents si JOIN goals g ON g.id=si.goal_id "
-        "JOIN payment_entries pe ON pe.source_type='SPEND_INTENT' AND pe.source_id=si.id AND pe.direction='OUT' "
-        "JOIN payment_evidence ev ON ev.payment_entry_id=pe.id "
-        "JOIN journal_entries je ON je.source_type='PAYMENT_ENTRY' AND je.source_id=pe.id "
-        "WHERE si.id=? AND si.status='EXECUTED' AND pe.status='CONFIRMED' AND je.status='POSTED' "
-        "ORDER BY pe.rowid DESC LIMIT 1", (intent_id,)
-    ).fetchone()
-    if row is None:
+        "LEFT JOIN payment_entries pe ON pe.source_type='SPEND_INTENT' AND pe.source_id=si.id "
+        "LEFT JOIN payment_evidence ev ON ev.payment_entry_id=pe.id "
+        "LEFT JOIN journal_entries je ON je.source_type='PAYMENT_ENTRY' AND je.source_id=pe.id "
+        "WHERE si.id=? AND si.status='EXECUTED'", (intent_id,)
+    ).fetchall()
+    if not rows:
         raise RegistryError("METRON_REGISTRY_SPEND_NOT_RECONCILED")
+    if len(rows) != 1:
+        raise RegistryError("METRON_REGISTRY_EVIDENCE_INVALID")
+    row = rows[0]
     chain, wallet = _context()
-    if row["chain"] != chain or str(row["goal_currency"]).upper() != "USDC" or row["payment_currency"] != "USDC" or str(row["provider"]).upper() != "CIRCLE":
+    if (row["payment_entry_id"] is None or row["evidence_id"] is None or row["journal_entry_id"] is None
+            or row["payment_status"] != "CONFIRMED" or row["journal_status"] != "POSTED"
+            or row["journal_line_count"] < 2 or row["journal_debit_atomic"] != row["amount_atomic"]
+            or row["journal_credit_atomic"] != row["amount_atomic"] or row["journal_non_usdc_count"] != 0):
+        raise RegistryError("METRON_REGISTRY_SPEND_NOT_RECONCILED")
+    if (row["chain"] != chain or str(row["goal_currency"]).upper() != "USDC"
+            or str(row["payment_currency"]).upper() != "USDC" or str(row["evidence_currency"]).upper() != "USDC"
+            or str(row["provider"]).upper() != "CIRCLE" or str(row["payment_provider"]).upper() != "CIRCLE"
+            or str(row["evidence_provider"]).upper() != "CIRCLE"):
         raise RegistryError("METRON_REGISTRY_EVIDENCE_INVALID")
-    if str(row["direction"]).upper() != "OUT" or str(row["provider_ref"]).strip() == "":
+    provider_ref = row["provider_payment_id"]
+    if (str(row["direction"]).upper() != "OUT" or not isinstance(provider_ref, str) or not provider_ref.strip()
+            or row["payment_provider_ref"] != provider_ref or row["provider_ref"] != provider_ref):
         raise RegistryError("METRON_REGISTRY_EVIDENCE_INVALID")
-    if _address(row["from_address"]) != wallet or _address(row["to_address"]) != _address(row["payee_address"]):
+
+    schemes = {"exact": "exact", "gatewaywalletbatched": "GatewayWalletBatched"}
+    approved_scheme = schemes.get(str(row["payment_scheme"] or "").casefold())
+    executed_scheme = schemes.get(str(row["executed_payment_scheme"] or "").casefold())
+    if not executed_scheme or executed_scheme != approved_scheme:
+        raise RegistryError("METRON_REGISTRY_EVIDENCE_INVALID")
+    if executed_scheme == "GatewayWalletBatched":
+        if row["evidence_type"] != "CIRCLE_GATEWAY_X402_TRANSFER":
+            raise RegistryError("METRON_REGISTRY_EVIDENCE_INVALID")
+        gateway_state = circle.gateway_balance(wallet, chain)
+        expected_sender = _address(circle.gateway_backing_eoa(gateway_state, wallet))
+    elif executed_scheme == "exact":
+        expected_sender = wallet
+    else:
+        raise RegistryError("METRON_UNSUPPORTED_PAYMENT_SCHEME")
+    if _address(row["from_address"]) != expected_sender or _address(row["to_address"]) != _address(row["payee_address"]):
         raise RegistryError("METRON_REGISTRY_EVIDENCE_INVALID")
     amount = _atomic(row["amount_atomic"])
-    if amount != row["provider_amount_atomic"] and row["provider_amount_atomic"] is not None:
+    if (amount != row["evidence_amount_atomic"] or amount != row["provider_amount_atomic"]
+            or amount > _atomic(row["max_cost_atomic"])):
         raise RegistryError("METRON_REGISTRY_EVIDENCE_INVALID")
     spend_id = _json_hash("METRON_SPEND_ID_V1", {"spend_intent_id": row["id"]})
     goal_hash = _json_hash("METRON_GOAL_V1", {
@@ -145,7 +181,40 @@ def record_spend(db: sqlite3.Connection, intent_id: str) -> dict:
         if chain not in CANONICAL_REGISTRIES:
             return {"status": "SKIPPED", "reason": "METRON_REGISTRY_UNAVAILABLE"}
         return _insert(db, "SPEND", _spend_fields(db, intent_id))
-    except (RegistryError, sqlite3.Error) as exc:
+    except (circle.CircleError, RegistryError, sqlite3.Error) as exc:
+        return {"status": "FAILED", "error_code": getattr(exc, "code", "METRON_REGISTRY_PERSISTENCE_FAILED")}
+
+
+def _spend_record_matches(record: sqlite3.Row, fields: dict) -> bool:
+    columns = (
+        "source_entity_id", "operating_wallet", "contract_address", "chain", "spend_id", "goal_hash",
+        "spend_intent_hash", "payment_evidence_hash", "amount_atomic",
+    )
+    return record["record_type"] == "SPEND" and all(record[name] == fields[name] for name in columns)
+
+
+def recover_spend(db: sqlite3.Connection, intent_id: str) -> dict:
+    """Recover only the EconomicRegistry record for an already reconciled spend."""
+    try:
+        fields = _spend_fields(db, intent_id)
+        matches = db.execute(
+            "SELECT * FROM registry_records WHERE record_type='SPEND' AND "
+            "(source_entity_id=? OR (chain=? AND operating_wallet=? AND spend_id=?))",
+            (intent_id, fields["chain"], fields["operating_wallet"], fields["spend_id"]),
+        ).fetchall()
+        if len(matches) > 1:
+            raise RegistryError("METRON_REGISTRY_RECONCILIATION_MISMATCH")
+        if matches:
+            record = matches[0]
+            if not _spend_record_matches(record, fields):
+                raise RegistryError("METRON_REGISTRY_RECONCILIATION_MISMATCH")
+            if record["status"] in {"CONFIRMED", "FAILED"}:
+                return {"id": record["id"], "status": record["status"], "tx_hash": record["tx_hash"],
+                        "error_code": record["error_code"]}
+        else:
+            record = _insert(db, "SPEND", fields)
+        return _sync_one(db, record)
+    except (circle.CircleError, RegistryError, sqlite3.Error) as exc:
         return {"status": "FAILED", "error_code": getattr(exc, "code", "METRON_REGISTRY_PERSISTENCE_FAILED")}
 
 
@@ -205,7 +274,7 @@ def record_revenue(db: sqlite3.Connection, invoice_id: str, earned_capital_atomi
             "earned_capital_atomic": earned,
         }
         return _insert(db, "REVENUE", fields)
-    except (RegistryError, sqlite3.Error, TypeError, ValueError) as exc:
+    except (circle.CircleError, RegistryError, sqlite3.Error, TypeError, ValueError) as exc:
         return {"status": "FAILED", "error_code": getattr(exc, "code", "METRON_REGISTRY_PERSISTENCE_FAILED")}
 
 
@@ -277,6 +346,16 @@ def _mark(db: sqlite3.Connection, record_id: str, status: str, **values) -> None
         db.execute(f"UPDATE registry_records SET {','.join(assignments)} WHERE id=?", params)
 
 
+def _claim_pending(db: sqlite3.Connection, record_id: str) -> bool:
+    with store.transaction(db):
+        changed = db.execute(
+            "UPDATE registry_records SET status='SUBMITTED',error_code=NULL,submitted_at=? "
+            "WHERE id=? AND status='PENDING' AND provider_tx_ref IS NULL AND tx_hash IS NULL",
+            (finance.now(), record_id),
+        ).rowcount
+    return changed == 1
+
+
 def _decode_output(response: dict) -> dict:
     value = response.get("data", response) if isinstance(response, dict) else None
     return value if isinstance(value, dict) else {}
@@ -296,7 +375,7 @@ def _sync_one(db: sqlite3.Connection, record: sqlite3.Row) -> dict:
                     return {"id": record["id"], "status": "FAILED", "error_code": "METRON_REGISTRY_RECONCILIATION_MISMATCH"}
                 _mark(db, record["id"], "CONFIRMED", confirmed_at=finance.now())
                 return {"id": record["id"], "status": "CONFIRMED", "tx_hash": record["tx_hash"], "revenue_count": revenue_count}
-            if record["provider_tx_ref"] or record["tx_hash"]:
+            if record["status"] != "PENDING" or record["provider_tx_ref"] or record["tx_hash"]:
                 _mark(db, record["id"], "UNKNOWN", error_code="METRON_REGISTRY_WRITE_PENDING_READBACK")
                 return {"id": record["id"], "status": "UNKNOWN", "error_code": "METRON_REGISTRY_WRITE_PENDING_READBACK"}
             execute = lambda: circle.registry_record_spend(
@@ -315,7 +394,7 @@ def _sync_one(db: sqlite3.Connection, record: sqlite3.Row) -> dict:
             if used:
                 _mark(db, record["id"], "FAILED", error_code="METRON_REGISTRY_RECONCILIATION_MISMATCH")
                 return {"id": record["id"], "status": "FAILED", "error_code": "METRON_REGISTRY_RECONCILIATION_MISMATCH"}
-            if record["provider_tx_ref"] or record["tx_hash"]:
+            if record["status"] != "PENDING" or record["provider_tx_ref"] or record["tx_hash"]:
                 _mark(db, record["id"], "UNKNOWN", error_code="METRON_REGISTRY_WRITE_PENDING_READBACK")
                 return {"id": record["id"], "status": "UNKNOWN", "error_code": "METRON_REGISTRY_WRITE_PENDING_READBACK"}
             spend_row = db.execute(
@@ -333,7 +412,8 @@ def _sync_one(db: sqlite3.Connection, record: sqlite3.Row) -> dict:
                 record["revenue_evidence_hash"], record["amount_atomic"], record["earned_capital_atomic"],
                 record["idempotency_key"]
             )
-        _mark(db, record["id"], "SUBMITTED", submitted_at=finance.now())
+        if not _claim_pending(db, record["id"]):
+            return {"id": record["id"], "status": "UNKNOWN", "error_code": "METRON_REGISTRY_WRITE_PENDING_READBACK"}
         result = _decode_output(execute())
         provider_ref = result.get("id") if isinstance(result.get("id"), str) else None
         tx_hash = result.get("txHash") if isinstance(result.get("txHash"), str) and TX_HASH.fullmatch(result["txHash"]) else None

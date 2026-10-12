@@ -44,7 +44,7 @@ The CLI returns stable codes in `{"ok":false,"error":{"code":...,"message":...}}
 | `METRON_REGISTRY_SCHEMA_CHANGED` | Circle's contract query output did not match the strict ABI result shape METRON accepts. |
 | `METRON_REGISTRY_SPEND_NOT_RECONCILED` | The Spend Intent lacks confirmed Circle evidence or a posted expense journal. |
 | `METRON_REGISTRY_WRITE_FAILED` | Circle rejected the registry transaction; reconcile local registry state before retrying. |
-| `METRON_REGISTRY_WRITE_PENDING_READBACK` | A prior registry transaction reference exists but the expected record is not yet visible; preserve `UNKNOWN` and sync again. |
+| `METRON_REGISTRY_WRITE_PENDING_READBACK` | A registry submission may already have occurred but the expected record is not yet visible; preserve `UNKNOWN` and use read-only sync again. Never resubmit it. |
 | `METRON_REGISTRY_READBACK_PENDING` | The write returned without a matching authoritative contract readback; preserve `UNKNOWN` and sync again. |
 | `METRON_REGISTRY_RECONCILIATION_MISMATCH` | On-chain fields conflict with the intended commitment; do not resubmit or alter local business truth. |
 | `METRON_REGISTRY_RECONCILIATION_FAILED` | Registry readback or reconciliation failed; retry only the registry sync after the provider is available. |
