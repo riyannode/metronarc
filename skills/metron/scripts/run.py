@@ -23,13 +23,13 @@ EVM_TX_HASH = re.compile(r"0x[0-9a-fA-F]{64}\Z")
 DASHBOARD_REFRESH_OPERATIONS = frozenset({
     "goal-create", "spend-propose", "spend-approve", "spend-execute", "payment-reconcile",
     "deal-create", "deal-update", "deal-accept", "deal-approve", "deal-reject",
-    "invoice-create", "invoice-post", "registry-sync",
+    "invoice-create", "invoice-post", "registry-sync", "registry-recover-spend",
 })
 
 
 def parser() -> argparse.ArgumentParser:
     result=argparse.ArgumentParser(description="METRON local economic control and ledger")
-    result.add_argument("operation",nargs="?",choices=("init","status","config-set","contract-address","goal-create","goal-get","spend-propose","spend-approve","spend-estimate","spend-execute","service-search","service-inspect","circle-terms-status","circle-terms-accept","preflight","wallet-list","wallet-balance","deal-create","deal-get","deal-update","deal-accept","deal-approve","deal-reject","invoice-create","invoice-post","invoice-get","payment-sync","payment-reconcile","registry-sync","journal-list","payment-list","events","dashboard"))
+    result.add_argument("operation",nargs="?",choices=("init","status","config-set","contract-address","goal-create","goal-get","spend-propose","spend-approve","spend-estimate","spend-execute","service-search","service-inspect","circle-terms-status","circle-terms-accept","preflight","wallet-list","wallet-balance","deal-create","deal-get","deal-update","deal-accept","deal-approve","deal-reject","invoice-create","invoice-post","invoice-get","payment-sync","payment-reconcile","registry-sync","registry-recover-spend","journal-list","payment-list","events","dashboard"))
     result.add_argument("--input",help="Path to a JSON input document")
     result.add_argument("--id",help="METRON entity ID")
     result.add_argument("--provider-ref",help="Circle transaction ID or hash for payment reconciliation")
@@ -414,6 +414,9 @@ def execute(args: argparse.Namespace) -> object:
                 record["registry"]=registry_after_revenue(db,invoice_id,record["earned_capital_atomic"])
             return record
         if operation=="registry-sync": return registry.sync(db,args.id)
+        if operation=="registry-recover-spend":
+            if not (args.id or "").startswith("SI-"): raise finance.DomainError("METRON_SPEND_NOT_FOUND")
+            return registry.recover_spend(db,args.id)
         if operation=="journal-list":
             rows=finance.listing(db,"journal_entries",args.limit)
             for row in rows: row["lines"]=[dict(line) for line in db.execute("SELECT account_code,debit_atomic,credit_atomic,currency FROM journal_lines WHERE journal_entry_id=?",(row["id"],))]
