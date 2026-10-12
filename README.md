@@ -4,7 +4,7 @@
 
 > An agent should earn the right to spend more capital by proving that previous spending generated revenue.
 
-METRON is a skill-first plugin for Codex and compatible local AI hosts. The host supplies reasoning, search, browser, and email connections. METRON supplies local economic state and policy. It does not host an LLM, email integration, MCP server, or remote backend.
+METRON is one skill-first plugin for Codex and compatible local AI hosts. `metron-policy` owns economic decisions and the finance CLI; `metron-email` autonomously operates customer conversations through the host's connected email and discovery tools. Both use the same local SQLite state. METRON does not bundle an email transport, host an LLM, provide an MCP server, or run a remote backend.
 
 ```mermaid
 flowchart LR
@@ -25,8 +25,8 @@ Circle Terms are never inferred from METRON use; see [Circle setup](docs/INSTALL
 Requirements: Python 3.11+, Circle CLI for provider operations, and Foundry for contract build/tests.
 
 ```sh
-python3 -B skills/metron/scripts/run.py init
-python3 -B skills/metron/scripts/run.py status
+python3 -B skills/metron-policy/scripts/run.py init
+python3 -B skills/metron-policy/scripts/run.py status
 ```
 
 Create a goal from a JSON file (amounts are exact USDC decimal strings):
@@ -46,7 +46,7 @@ Create a goal from a JSON file (amounts are exact USDC decimal strings):
 ```
 
 ```sh
-python3 -B skills/metron/scripts/run.py goal-create --input goal.json
+python3 -B skills/metron-policy/scripts/run.py goal-create --input goal.json
 ```
 
 All runtime state is stored under `~/.metron/`, outside the plugin source/cache. The read-only dashboard is generated at `~/.metron/dashboard.html` and shows the active goal, collected revenue, confirmed spend, net contribution, realized ROI, earned operating capital, spending and daily authorization limits, minimum Circle wallet balance, deal and approval counts, and latest records including open invoices. It does not show legacy account `1010` as a current balance.
@@ -85,8 +85,9 @@ Below-minimum deals, deals marked `custom_or_legal_terms: true`, and deals with 
 - Paid-service execution supports `exact` and `GatewayWalletBatched` x402 on Arc Testnet. Gateway transfers are recorded only after Circle's authoritative transfer API reports `confirmed` or `completed`.
 - Circle CLI automatically prefers a Gateway-batched option when the seller and Gateway balance support it. METRON records the rail returned by Circle and reconciles it through the matching authoritative source; a rail mismatch remains `UNKNOWN` and is never retried automatically.
 - The default chain is `ARC-TESTNET`; change it only through an explicit local configuration step after verifying the target chain.
-- OTP login, wallet funding, testnet service payment, and customer outreach require external account or user actions. Users do not deploy or fund a METRON contract.
+- Circle OTP login, wallet funding, and testnet service payment require the wallet owner's account actions. Routine customer email runs through the connected host account without an extra approval gate. Users do not deploy or fund a METRON contract.
 - Testnet transaction evidence does not prove mainnet readiness or business truth.
-- METRON has no bundled email, hosted service, agent, scheduler, dashboard write controls, or arbitrary contract executor.
+- Customer outreach and replies are performed by `metron-email` through the host's connected email tools; METRON has no bundled email transport.
+- METRON has no hosted service, agent, scheduler, dashboard write controls, or arbitrary contract executor. The user configures scheduler frequency in the host.
 
 See [installation](docs/INSTALL.md), [privacy policy](docs/PRIVACY.md), [security boundaries](docs/SECURITY.md), [architecture](docs/ARCHITECTURE.md), and [demo flow](docs/DEMO.md).

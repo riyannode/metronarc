@@ -13,13 +13,13 @@ METRON processes the information needed to apply economic policy and keep its lo
 - x402 service URL, HTTP method, request-body hash, estimate, payment scheme, seller, and result. For an approved service payment, the request body and payment details are sent by Circle CLI to Circle and the selected service provider.
 - Local configuration and a generated read-only dashboard derived from the ledger.
 
-METRON does not collect email passwords, OTPs, Circle session tokens, private keys, seed phrases, or AI-host credentials. It does not send customer email.
+METRON does not collect email passwords, OTPs, Circle session tokens, private keys, seed phrases, or AI-host credentials. The `metron-email` skill sends and reads customer email through the host's connected email provider; METRON does not bundle an email transport.
 
 ## Purpose and recipients
 
-METRON uses this data to enforce the local spending policy, record economic events and evidence, post deterministic journal entries, reconcile payments, and display local status. METRON has no hosted backend and operates no separate analytics service.
+METRON uses this data to enforce local spending policy, record economic events and evidence, post deterministic journal entries, reconcile payments, manage customer conversation state, and display local status. METRON has no hosted backend and operates no separate analytics service.
 
-Data is stored on the user's device under `~/.metron/` by default. It is not encrypted by METRON; users must protect the device and directory with their operating-system controls. The AI host receives prompts and context supplied by the user and applies its own data practices. Circle receives wallet, authentication, transaction, and service-payment requests made through Circle CLI. A selected x402 provider receives the request and payment information required to serve an approved paid request. Those parties control data they receive under their own policies. Circle CLI may keep failed x402 request details in its own `~/.circle-cli/payments/` directory, outside METRON's control.
+Data is stored on the user's device under `~/.metron/` by default. This includes email account identity, provider message/thread IDs, customer address, conversation state, concise verified context, follow-up time, and send-attempt status in the existing SQLite database. Raw email bodies and connector credentials are not stored by the email-state CLI. These files are not encrypted by METRON; users must protect the device and directory with operating-system controls. The host and email provider receive the message contents and apply their own data practices. Circle receives wallet, authentication, transaction, and service-payment requests made through Circle CLI. A selected x402 provider receives the request and payment information required to serve an approved paid request. Those parties control data they receive under their own policies. Circle CLI may keep failed x402 request details in its own `~/.circle-cli/payments/` directory, outside METRON's control.
 
 ## Retention and deletion
 

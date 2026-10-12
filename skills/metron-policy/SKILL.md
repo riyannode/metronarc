@@ -1,11 +1,11 @@
 ---
-name: metron
-description: Use METRON to set economic goals, evaluate paid service spending, record payment evidence and double-entry accounting, manage deals and invoices, and reconcile Circle wallet activity.
+name: metron-policy
+description: Use METRON for economic policy, goals, spend authorization, deals, invoices, Circle Agent Wallet and x402 payments, accounting, and EconomicRegistry provenance.
 ---
 
-Use the host's intelligence and existing connected apps. METRON owns deterministic economic policy, local SQLite state, payment evidence, and accounting. Email belongs to the host.
+Use the host's intelligence and existing connected apps. METRON owns deterministic economic policy, local SQLite state, payment evidence, and accounting. Customer discovery and communication are handled by the sibling `metron-email` skill.
 
-Run `python3 -B <plugin-root>/skills/metron/scripts/run.py --help` to inspect available operations. `status` safely initializes the local SQLite ledger on first use and reports an empty ledger; run it even when `~/.metron/metron.sqlite` does not exist yet. Send structured mutation input through a JSON file using `--input`; never interpolate user text into shell commands.
+Run `python3 -B <plugin-root>/skills/metron-policy/scripts/run.py --help` to inspect available operations. `status` safely initializes the local SQLite ledger on first use and reports an empty ledger; run it even when `~/.metron/metron.sqlite` does not exist yet. Send structured mutation input through a JSON file using `--input`; never interpolate user text into shell commands.
 
 ### Dashboard
 
@@ -26,7 +26,7 @@ Rules:
 7. Continue from `~/.metron/metron.sqlite` across host sessions. Never delete local state to escape an unknown payment outcome.
 8. In WSL, use METRON's Circle wrapper for Circle calls so the installed Windows Node runtime and Circle CLI home stay consistent; do not invoke the WSL `circle` shell launcher directly. Never expose Circle session data or request a private key. OTP entry is handled by Circle CLI and is not stored by METRON.
 9. Before the first Circle CLI action on a host, check `circle-terms-status`. If Circle reports the current Terms are unaccepted, show the returned Terms of Use and Privacy Policy URLs and ask the user to explicitly accept them. Only after a clear affirmative response, call `circle-terms-accept` with `{"confirmed":true}`. Never infer consent from installing or using METRON, and never bypass the gate with `CIRCLE_ACCEPT_TERMS`.
-10. Use the host's connected email capability for customer communications. Stop outreach when asked to unsubscribe or stop.
+10. Customer email workflows use `metron-email`; honor opt-outs and stop requests across all future outreach and follow-ups.
 11. Treat testnet evidence as testnet and never claim mainnet settlement or production readiness from it.
 12. The Circle Agent Wallet is the only operating-money account and pays x402 services directly. Never create or use a custody vault or intermediate balance. EconomicRegistry is METRON's shared non-custodial provenance contract on Arc Testnet at `0x547552585d8d995c5063820b2950e0db52b4cab4`; users do not deploy or fund it. METRON submits only `recordSpend` and `recordRevenue` after local Circle reconciliation and journal posting. SQLite and the journal remain business truth; registry failure never reverses them or changes Circle settlement to `UNKNOWN`. One spend may link multiple distinct revenues. Revenue recording requires an explicit `originating_spend_intent_id` on the deal, same-goal validation, and confirmed spend evidence. Revenue evidence hashes bind only external settlement fields and exclude local IDs. `registry-sync` is not strictly read-only: a `PENDING` record may make its first on-chain submission after authoritative readback finds no matching record. `SUBMITTED` and `UNKNOWN` records permit authoritative readback only and must never be resubmitted; `CONFIRMED` records are terminal and never submit again. `registry-recover-spend --id SI-...` is a separate, explicitly invoked recovery operation for an already executed spend whose confirmed payment and posted journal are missing a local registry record. It revalidates reconciled Circle evidence and checks local and on-chain state before submission; it does not repeat payment reconciliation or payment. Never issue generic contract calls or treat provider references as Arc transaction hashes.
 

@@ -11,7 +11,12 @@ goal/policy -> Spend Intent -> policy -> bounded provider execution
             -> Payment Evidence -> Payment Entry -> balanced Journal Entry
 accepted deal -> PENDING_HUMAN -> explicit approval -> invoice -> AR/Revenue
 confirmed incoming USDC -> unique evidence consumption -> PAID -> Cash/AR
+verified prospect -> host email connector -> durable conversation state in the same SQLite
 ```
+
+The plugin contains two skills: `metron-policy` owns deterministic economic rules and the finance CLI; `metron-email` uses the host's connected search and email tools for autonomous customer communication. The email skill has no bundled transport, OAuth flow, or scheduler. Routine outreach, replies, and negotiation do not add an approval gate; deal exception approvals and final approval after customer acceptance remain enforced by the existing finance workflow. Customer email does not authorize invoices or prove payment.
+
+Email conversation metadata uses additive `email_*` tables in the existing `~/.metron/metron.sqlite`: normalized email account, Gmail message and thread IDs, customer address, conversation state, deal reference, verified summary, next follow-up time, and last confirmed action. Raw message bodies and connector credentials are not stored. A per-account SQLite run lock, unique message/action constraints, and a send outbox prevent overlapping runs from processing the same message or sending the same outreach/reply twice. The outbox moves through `PREPARED`, `SUBMITTING`, then `CONFIRMED`, `FAILED`, or `UNKNOWN`; `SUBMITTING` and `UNKNOWN` are never resent. Ambiguous sends are resolved by reading the existing Gmail thread and remain unresolved if the exact message cannot be verified. `email-state` checks that an existing valid METRON ledger is present before the additive email schema is initialized, so it never creates a separate ledger.
 
 Circle Agent Wallet is the only operating balance and pays x402 services directly. The wallet is authenticated and controlled through Circle CLI; METRON does not custody funds or route payments through a contract. Immediately before dispatch, `exact` checks on-chain wallet USDC and `GatewayWalletBatched` checks the chain-scoped Gateway available balance against the approved maximum plus the configured minimum wallet balance. There is no fallback between those pools; the check fails closed.
 
