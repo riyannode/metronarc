@@ -92,10 +92,10 @@ def _spend_fields(db: sqlite3.Connection, intent_id: str) -> dict:
             or row["journal_line_count"] < 2 or row["journal_debit_atomic"] != row["amount_atomic"]
             or row["journal_credit_atomic"] != row["amount_atomic"] or row["journal_non_usdc_count"] != 0):
         raise RegistryError("METRON_REGISTRY_SPEND_NOT_RECONCILED")
-    if (row["chain"] != chain or str(row["goal_currency"]).upper() != "USDC"
+    if (not isinstance(row["provider"], str) or not row["provider"].strip()
+            or row["chain"] != chain or str(row["goal_currency"]).upper() != "USDC"
             or str(row["payment_currency"]).upper() != "USDC" or str(row["evidence_currency"]).upper() != "USDC"
-            or str(row["provider"]).upper() != "CIRCLE" or str(row["payment_provider"]).upper() != "CIRCLE"
-            or str(row["evidence_provider"]).upper() != "CIRCLE"):
+            or row["payment_provider"] != "CIRCLE" or row["evidence_provider"] != "CIRCLE"):
         raise RegistryError("METRON_REGISTRY_EVIDENCE_INVALID")
     provider_ref = row["provider_payment_id"]
     if (str(row["direction"]).upper() != "OUT" or not isinstance(provider_ref, str) or not provider_ref.strip()
@@ -113,6 +113,8 @@ def _spend_fields(db: sqlite3.Connection, intent_id: str) -> dict:
         gateway_state = circle.gateway_balance(wallet, chain)
         expected_sender = _address(circle.gateway_backing_eoa(gateway_state, wallet))
     elif executed_scheme == "exact":
+        if row["evidence_type"] != "CIRCLE_TRANSACTION":
+            raise RegistryError("METRON_REGISTRY_EVIDENCE_INVALID")
         expected_sender = wallet
     else:
         raise RegistryError("METRON_UNSUPPORTED_PAYMENT_SCHEME")
@@ -138,7 +140,7 @@ def _spend_fields(db: sqlite3.Connection, intent_id: str) -> dict:
     })
     payment_hash = _json_hash("METRON_PAYMENT_EVIDENCE_V1", {
         "chain": chain, "operating_wallet": wallet, "from_address": _address(row["from_address"]),
-        "to_address": _address(row["to_address"]), "provider": str(row["provider"]).upper(),
+        "to_address": _address(row["to_address"]), "provider": row["payment_provider"],
         "provider_ref": str(row["provider_ref"]), "tx_hash": _hash_or_null(row["tx_hash"]),
         "currency": "USDC", "amount_atomic": amount,
     })

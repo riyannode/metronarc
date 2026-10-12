@@ -104,9 +104,12 @@ def propose_spend(db: sqlite3.Connection, data: dict) -> dict:
     goal_id = str(data.get("goal_id", ""))
     with store.transaction(db):
         policy = require_goal(db, goal_id)
-        required = ("service_url","http_method","payment_scheme","accepted_chains","payee_address","purpose","reason","expected_output","quoted_cost")
+        required = ("provider","service_url","http_method","payment_scheme","accepted_chains","payee_address","purpose","reason","expected_output","quoted_cost")
         if any(not data.get(key) for key in required):
             raise DomainError("METRON_POLICY_MISSING")
+        if not isinstance(data["provider"],str) or not data["provider"].strip():
+            raise DomainError("METRON_INVALID_INPUT")
+        merchant_provider=data["provider"].strip().upper()
         service=service_url(str(data["service_url"]))
         method=str(data["http_method"]).upper()
         if method not in {"GET","POST","PUT","PATCH","DELETE"}:
@@ -158,7 +161,7 @@ def propose_spend(db: sqlite3.Connection, data: dict) -> dict:
         status = {"ALLOW":"APPROVED","DENY":"DENIED","ESCALATE":"ESCALATED"}[result]
         db.execute(
             "INSERT INTO spend_intents(id,goal_id,counterparty_id,provider,service_url,http_method,payment_scheme,payee_address,request_body_hash,purpose,reason,expected_output,quoted_cost_atomic,max_cost_atomic,expected_value_atomic,expected_roi_bps,policy_result,status,reason_hash,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (intent_id,goal_id,counterparty_id,str(data.get("provider","CIRCLE")).upper(),service,method,scheme,payee,request_body_hash,str(data["purpose"]),str(data["reason"]),str(data["expected_output"]),quote,maximum,expected,roi,result,status,reason_hash,timestamp),
+            (intent_id,goal_id,counterparty_id,merchant_provider,service,method,scheme,payee,request_body_hash,str(data["purpose"]),str(data["reason"]),str(data["expected_output"]),quote,maximum,expected,roi,result,status,reason_hash,timestamp),
         )
         store.event(db,"SPEND_INTENT_"+result,"spend_intent",intent_id,reason,{"max_cost_atomic":maximum},timestamp)
     return {"id":intent_id,"policy_result":result,"status":status,"max_cost":"%s USDC"%display(maximum),"reason":reason,"http_method":method,"payment_scheme":scheme,"payee_address":payee,"request_body_hash":request_body_hash}
@@ -222,11 +225,17 @@ def record_spend_result(db: sqlite3.Connection, intent_id: str, result: dict, ex
         config=store.read_config()
         sender=expected_sender if expected_sender is not None else config.get("operating_wallet")
         is_address=lambda value: isinstance(value,str) and len(value)==42 and value.startswith("0x") and all(ch in "0123456789abcdefABCDEF" for ch in value[2:])
+        schemes={"exact":"exact","gatewaywalletbatched":"GatewayWalletBatched"}
+        approved_scheme=schemes.get(str(intent["payment_scheme"] or "").casefold())
+        executed_scheme=schemes.get(str(intent["executed_payment_scheme"] or intent["payment_scheme"] or "").casefold())
+        expected_evidence_type={"exact":"CIRCLE_TRANSACTION","GatewayWalletBatched":"CIRCLE_GATEWAY_X402_TRANSFER"}.get(approved_scheme)
         valid_identity=(
             isinstance(ref,str) and bool(ref) and (not intent["provider_payment_id"] or ref==intent["provider_payment_id"])
             and isinstance(amount,int) and not isinstance(amount,bool) and 0<amount<=intent["max_cost_atomic"]
             and intent["provider_amount_atomic"] is not None and amount==intent["provider_amount_atomic"]
-            and result.get("provider")==intent["provider"] and result.get("currency")=="USDC"
+            and approved_scheme is not None and executed_scheme==approved_scheme
+            and result.get("evidence_type")==expected_evidence_type
+            and result.get("provider")=="CIRCLE" and result.get("currency")=="USDC"
             and result.get("direction") in ("OUT","OUTBOUND") and is_address(sender)
             and is_address(result.get("to_address")) and result["to_address"].lower()==intent["payee_address"].lower()
             and is_address(result.get("from_address")) and result["from_address"].lower()==sender.lower()
@@ -246,8 +255,8 @@ def record_spend_result(db: sqlite3.Connection, intent_id: str, result: dict, ex
         entry_id=store.next_id(db,"payment_entries","PE")
         evidence_id=store.next_id(db,"payment_evidence","EV")
         raw=json.dumps(result,sort_keys=True,separators=(",",":"))
-        db.execute("INSERT INTO payment_entries(id,source_type,source_id,direction,amount_atomic,currency,provider,provider_payment_id,status,created_at,confirmed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",(entry_id,"SPEND_INTENT",intent_id,"OUT",amount,"USDC",intent["provider"],ref,"CONFIRMED",timestamp,timestamp))
-        db.execute("INSERT INTO payment_evidence(id,payment_entry_id,provider,evidence_type,provider_ref,chain,tx_hash,from_address,to_address,amount_atomic,currency,raw_evidence_hash,observed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",(evidence_id,entry_id,intent["provider"],str(result.get("evidence_type","CIRCLE_SERVICE_RESULT")),ref,result.get("chain"),result.get("tx_hash"),result.get("from_address"),result.get("to_address"),amount,"USDC",str(result.get("raw_evidence_hash") or hashlib.sha256(raw.encode()).hexdigest()),timestamp))
+        db.execute("INSERT INTO payment_entries(id,source_type,source_id,direction,amount_atomic,currency,provider,provider_payment_id,status,created_at,confirmed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",(entry_id,"SPEND_INTENT",intent_id,"OUT",amount,"USDC","CIRCLE",ref,"CONFIRMED",timestamp,timestamp))
+        db.execute("INSERT INTO payment_evidence(id,payment_entry_id,provider,evidence_type,provider_ref,chain,tx_hash,from_address,to_address,amount_atomic,currency,raw_evidence_hash,observed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",(evidence_id,entry_id,"CIRCLE",expected_evidence_type,ref,result.get("chain"),result.get("tx_hash"),result.get("from_address"),result.get("to_address"),amount,"USDC",str(result.get("raw_evidence_hash") or hashlib.sha256(raw.encode()).hexdigest()),timestamp))
         journal=post_journal(db,"PAYMENT_ENTRY",entry_id,"Circle x402 acquisition expense","5000","1000",amount,"USDC",timestamp)
         db.execute("UPDATE spend_intents SET status='EXECUTED',provider_payment_id=?,executed_at=? WHERE id=?",(ref,timestamp,intent_id))
         store.event(db,"SPEND_EXECUTED","payment_entry",entry_id,"Confirmed Circle service payment recorded",{"intent_id":intent_id,"journal_id":journal},timestamp)
