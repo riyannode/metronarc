@@ -37,17 +37,17 @@ The CLI returns stable codes in `{"ok":false,"error":{"code":...,"message":...}}
 | `METRON_CIRCLE_SCHEMA_CHANGED` | Circle output did not match the strict JSON shape METRON accepts. |
 | `METRON_REGISTRY_ATTRIBUTION_INVALID` | Revenue attribution does not point to an existing, same-goal Spend Intent. |
 | `METRON_REGISTRY_EVIDENCE_INVALID` | Reconciled Circle evidence or its exact amount/address fields do not satisfy registry commitment requirements. |
-| `METRON_REGISTRY_ORIGIN_SPEND_PENDING` | The attributed spend is not yet confirmed on-chain; sync the spend record before recording revenue. |
+| `METRON_REGISTRY_ORIGIN_SPEND_PENDING` | The attributed spend is not yet confirmed on-chain; sync its outbox record before recording revenue. A `PENDING` spend record may make its first submission during sync; a `SUBMITTED` or `UNKNOWN` record permits readback only. |
 | `METRON_REGISTRY_PERSISTENCE_FAILED` | The local registry outbox could not persist the provenance record; business truth remains unchanged. |
 | `METRON_REGISTRY_RECORD_NOT_FOUND` | The requested registry outbox record does not exist; inspect local registry status and use its source entity ID. |
 | `METRON_REGISTRY_REVENUE_NOT_RECONCILED` | The incoming payment, invoice, journal, or deal is not fully reconciled for revenue recording. |
 | `METRON_REGISTRY_SCHEMA_CHANGED` | Circle's contract query output did not match the strict ABI result shape METRON accepts. |
 | `METRON_REGISTRY_SPEND_NOT_RECONCILED` | The Spend Intent lacks confirmed Circle evidence or a posted expense journal. |
-| `METRON_REGISTRY_WRITE_FAILED` | Circle rejected the registry transaction; reconcile local registry state before retrying. |
-| `METRON_REGISTRY_WRITE_PENDING_READBACK` | A registry submission may already have occurred but the expected record is not yet visible; preserve `UNKNOWN` and use read-only sync again. Never resubmit it. |
-| `METRON_REGISTRY_READBACK_PENDING` | The write returned without a matching authoritative contract readback; preserve `UNKNOWN` and sync again. |
+| `METRON_REGISTRY_WRITE_FAILED` | Circle reported a terminal rejection; inspect the local record and authoritative contract state. The failed record is not automatically resubmitted. |
+| `METRON_REGISTRY_WRITE_PENDING_READBACK` | A registry submission may already have occurred but the expected record is not yet visible; preserve `UNKNOWN` and use authoritative readback only. Never resubmit it. |
+| `METRON_REGISTRY_READBACK_PENDING` | The write returned without a matching authoritative contract readback; preserve `UNKNOWN` and use authoritative readback only. |
 | `METRON_REGISTRY_RECONCILIATION_MISMATCH` | On-chain fields conflict with the intended commitment; do not resubmit or alter local business truth. |
-| `METRON_REGISTRY_RECONCILIATION_FAILED` | Registry readback or reconciliation failed; retry only the registry sync after the provider is available. |
+| `METRON_REGISTRY_RECONCILIATION_FAILED` | Registry readback or reconciliation failed; once the provider is available, sync the existing `SUBMITTED` or `UNKNOWN` record for authoritative readback only. |
 | `METRON_CIRCLE_TIMEOUT` | Circle did not return before timeout; payment status may be ambiguous. |
 | `METRON_PAYMENT_AMBIGUOUS` | Preserve `UNKNOWN`; query authoritative Circle transaction history or x402 transfer status before any retry. |
 | `METRON_PAYMENT_NOT_FOUND` | Provider reference was not found in the authoritative Circle response. |
@@ -73,4 +73,10 @@ The CLI returns stable codes in `{"ok":false,"error":{"code":...,"message":...}}
 - `METRON_CUSTOM_TERMS_APPROVAL_REQUIRED` requires explicit pre-acceptance `deal-approve`; customer acceptance still triggers its own separate final approval gate.
 - `METRON_HUMAN_APPROVAL_REQUIRED` needs a direct human decision.
 - `METRON_CIRCLE_NOT_AUTHENTICATED` requires the wallet owner to complete the email OTP in Circle CLI. Never store the OTP in METRON state or repository files.
-- Registry sync failures affect only provenance state. They do not change reconciled Circle payment, invoice, journal, or operating-capital state; keep ambiguous writes `UNKNOWN` until contract readback resolves them.
+- Registry sync failures affect only provenance state. They do not change reconciled Circle payment, invoice, journal, or operating-capital state. `registry-sync` is not strictly read-only: it may submit a first write for a `PENDING` record after a contract read finds no matching record. For `SUBMITTED` and `UNKNOWN`, it performs authoritative readback only and never resubmits; `CONFIRMED` records are terminal and never submit again. If sync fails after a submission claim or an ambiguous response, keep the record `SUBMITTED` or `UNKNOWN` and use readback only.
+
+## Registry operation boundaries
+
+- `registry-sync` reconciles outbox records. Only `PENDING` can make its first submission, guarded by a conditional SQLite claim and a pre-submit contract read. `SUBMITTED` and `UNKNOWN` are readback-only; `CONFIRMED` and `FAILED` are terminal for sync.
+- `registry-recover-spend --id SI-...` is a separate explicit recovery operation for an already executed spend with confirmed Circle payment, exact provider amount, and a posted balanced journal. It checks local identities and contract state before any first submission. It does not repeat payment reconciliation.
+- A process crash after the `PENDING` claim leaves `SUBMITTED`; timeout or ambiguous submission becomes `UNKNOWN`. Neither state permits another submission. If readback cannot resolve it, stop for operator investigation instead of retrying the write.
