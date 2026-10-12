@@ -261,7 +261,7 @@ def validate_service_estimate(response: dict, maximum_atomic: int, seller: str, 
     price=value.get("price"); actual_chain=value.get("chain"); actual_scheme=value.get("scheme"); actual_seller=value.get("seller")
     if price is None or not all(isinstance(item,str) and item for item in (actual_chain,actual_scheme,actual_seller)):
         raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
-    amount_atomic=_estimate_price_atomic(price,value)
+    amount_atomic=_usdc_amount_atomic(price,value)
     if actual_scheme.lower() not in {"exact","gatewaywalletbatched"}: raise CircleError("METRON_UNSUPPORTED_PAYMENT_SCHEME")
     if actual_scheme.lower()!=scheme.lower(): raise CircleError("METRON_UNSUPPORTED_PAYMENT_SCHEME")
     if not _is_arc_testnet_chain(actual_chain) or not _is_arc_testnet_chain(chain):
@@ -271,7 +271,7 @@ def validate_service_estimate(response: dict, maximum_atomic: int, seller: str, 
     return {"amount_atomic":amount_atomic,"chain":actual_chain,"scheme":actual_scheme,"seller":actual_seller}
 
 
-def _estimate_price_atomic(price: str, estimate: dict) -> int:
+def _usdc_amount_atomic(price: str, estimate: dict) -> int:
     if not isinstance(price,str): raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
     match=re.fullmatch(r"\s*\$?([0-9]+)(?:\.([0-9]+))?(?:\s+([A-Za-z][A-Za-z0-9]*))?\s*",price)
     if not match: raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
@@ -398,9 +398,23 @@ def service_payment_metadata(response: dict) -> dict:
     if not isinstance(payment,dict): raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
     amount=payment.get("amount"); chain=payment.get("chain"); seller=payment.get("seller"); scheme=payment.get("scheme")
     if amount is None or not isinstance(chain,str) or not isinstance(seller,str) or not isinstance(scheme,str): raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
-    if len(seller)!=42 or not seller.startswith("0x") or any(ch not in "0123456789abcdefABCDEF" for ch in seller[2:]): raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
-    return {"amount_atomic":_atomic_from_provider(amount),"chain":chain,"seller":seller,"scheme":scheme,"response":outer.get("response")}
-    return None
+    if not _is_evm_address(seller): raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+    return {"amount_atomic":_usdc_amount_atomic(amount,payment),"chain":chain,"seller":seller,"scheme":scheme,"response":outer.get("response")}
+
+
+def validate_service_payment_metadata(metadata: dict, maximum_atomic: int, seller: str, chain: str, scheme: str) -> None:
+    if not isinstance(metadata,dict): raise CircleError("METRON_PAYMENT_AMBIGUOUS")
+    amount=metadata.get("amount_atomic"); actual_chain=metadata.get("chain"); actual_seller=metadata.get("seller"); actual_scheme=metadata.get("scheme")
+    if not isinstance(amount,int) or isinstance(amount,bool) or amount<0 or not isinstance(actual_chain,str) or not isinstance(actual_seller,str) or not isinstance(actual_scheme,str):
+        raise CircleError("METRON_PAYMENT_AMBIGUOUS")
+    if not isinstance(maximum_atomic,int) or isinstance(maximum_atomic,bool) or maximum_atomic<0:
+        raise CircleError("METRON_PAYMENT_AMBIGUOUS")
+    if actual_scheme.lower() not in {"exact","gatewaywalletbatched"} or actual_scheme.lower()!=scheme.lower():
+        raise CircleError("METRON_PAYMENT_AMBIGUOUS")
+    if not _is_arc_testnet_chain(actual_chain) or not _is_arc_testnet_chain(chain):
+        raise CircleError("METRON_PAYMENT_AMBIGUOUS")
+    if not _is_evm_address(actual_seller) or not _is_evm_address(seller) or actual_seller.lower()!=seller.lower() or amount>maximum_atomic:
+        raise CircleError("METRON_PAYMENT_AMBIGUOUS")
 
 
 def _atomic_from_provider(value, direct: bool=False) -> int:
