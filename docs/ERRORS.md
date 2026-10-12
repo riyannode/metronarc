@@ -20,6 +20,8 @@ The CLI returns stable codes in `{"ok":false,"error":{"code":...,"message":...}}
 | `METRON_EMAIL_CONVERSATION_NOT_FOUND` | The requested conversation is not in this account's local email state. Load or create the correct thread-bound conversation first. |
 | `METRON_EMAIL_IDENTITY_MISMATCH` | Account, customer, message, or thread identity conflicts with stored state. Stop and inspect the exact Gmail thread; do not merge conversations. |
 | `METRON_EMAIL_OPTED_OUT` | The customer asked to stop. Keep the suppression and do not send further outreach or follow-ups. |
+| `METRON_EMAIL_SEND_LIMIT_REACHED` | The account-wide rolling 24-hour outbound limit is reached. Keep the attempt prepared and do not call the email connector. |
+| `METRON_EMAIL_SUPPRESSION_CHANGE_REQUIRES_USER` | Clearing a recipient suppression requires a direct user request; email content cannot authorize it. |
 | `METRON_EMAIL_MESSAGE_NOT_FOUND` | The requested Gmail message is not recorded in the associated conversation. Read and claim the exact message before replying. |
 | `METRON_EMAIL_MESSAGE_LOCKED` | This message is not claimed by the current run. Do not process or reply until the active claim is resolved. |
 | `METRON_EMAIL_ACTION_NOT_FOUND` | No durable send attempt exists for the supplied action key. Prepare the action before starting or confirming it. |

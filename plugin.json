@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "metron",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Local economic policy, accounting, and autonomous customer email operations for AI agents.",
   "license": "MIT",
   "keywords": ["agents", "payments", "accounting", "usdc", "email", "gmail", "customer-operations"],

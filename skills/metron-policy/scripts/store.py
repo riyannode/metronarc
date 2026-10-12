@@ -111,6 +111,15 @@ CREATE TABLE IF NOT EXISTS email_conversations (
   last_confirmed_action TEXT, next_follow_up_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   UNIQUE(account_email,conversation_key), UNIQUE(account_email,gmail_thread_id)
 );
+CREATE TABLE IF NOT EXISTS email_contact_suppressions (
+  account_email TEXT NOT NULL, recipient_email TEXT NOT NULL, source_thread_id TEXT,
+  opted_out_at TEXT NOT NULL, PRIMARY KEY(account_email,recipient_email)
+);
+CREATE TABLE IF NOT EXISTS email_account_limits (
+  account_email TEXT PRIMARY KEY,
+  max_outbound_per_24h INTEGER NOT NULL CHECK (max_outbound_per_24h >= 0),
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS email_messages (
   id INTEGER PRIMARY KEY, account_email TEXT NOT NULL, gmail_message_id TEXT NOT NULL,
   gmail_thread_id TEXT NOT NULL, conversation_id TEXT NOT NULL REFERENCES email_conversations(id),
@@ -179,6 +188,11 @@ def connect() -> sqlite3.Connection:
 def initialize() -> dict[str, str]:
     with connect() as db:
         db.executescript(SCHEMA)
+        db.execute(
+            "INSERT OR IGNORE INTO email_contact_suppressions(account_email,recipient_email,source_thread_id,opted_out_at) "
+            "SELECT lower(account_email),lower(customer_email),min(gmail_thread_id),min(updated_at) "
+            "FROM email_conversations WHERE state='OPTED_OUT' GROUP BY lower(account_email),lower(customer_email)"
+        )
         _migrate_registry_schema(db)
         db.executescript("""
             CREATE INDEX IF NOT EXISTS idx_registry_records_status ON registry_records(status,record_type,created_at);

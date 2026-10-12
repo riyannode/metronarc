@@ -16,6 +16,7 @@ STATES = {
     "PROSPECTING", "ACTIVE", "NEGOTIATING", "CUSTOMER_ACCEPTED", "PENDING_HUMAN",
     "HUMAN_APPROVED", "HUMAN_REJECTED", "INVOICED", "CLOSED_WON", "CLOSED_LOST", "OPTED_OUT",
 }
+DEFAULT_OUTBOUND_PER_24H = 10
 
 
 def _input(data: dict, allowed: set[str], required: set[str] = frozenset()) -> None:
@@ -77,6 +78,21 @@ def _conversation(db: sqlite3.Connection, account: str, conversation_id: str) ->
     if row is None:
         raise finance.DomainError("METRON_EMAIL_CONVERSATION_NOT_FOUND")
     return row
+
+
+def _is_suppressed(db: sqlite3.Connection, account: str, recipient: str) -> bool:
+    return db.execute(
+        "SELECT 1 FROM email_contact_suppressions WHERE account_email=? AND recipient_email=?",
+        (account, recipient),
+    ).fetchone() is not None
+
+
+def _record_opt_out(db: sqlite3.Connection, account: str, recipient: str, thread: str | None) -> None:
+    db.execute(
+        "INSERT OR IGNORE INTO email_contact_suppressions(account_email,recipient_email,source_thread_id,opted_out_at) "
+        "VALUES (?,?,?,datetime('now'))",
+        (account, recipient, thread),
+    )
 
 
 def _conversation_for_thread(
@@ -142,6 +158,47 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
             )
             return {"status": "RENEWED", "expires_in_seconds": lease}
 
+    if action == "send-limit-get":
+        _input(data, {"action", "account_email"}, {"action", "account_email"})
+        account = _email(data, "account_email")
+        row = db.execute(
+            "SELECT max_outbound_per_24h FROM email_account_limits WHERE account_email=?", (account,)
+        ).fetchone()
+        return {
+            "account_email": account,
+            "max_outbound_per_24h": row["max_outbound_per_24h"] if row else DEFAULT_OUTBOUND_PER_24H,
+            "configured": row is not None,
+        }
+
+    if action == "send-limit-set":
+        _input(data, {"action", "account_email", "max_outbound_per_24h"},
+               {"action", "account_email", "max_outbound_per_24h"})
+        account = _email(data, "account_email")
+        limit = data["max_outbound_per_24h"]
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 0 <= limit <= 2147483647:
+            raise finance.DomainError("METRON_INVALID_INPUT")
+        with store.transaction(db):
+            db.execute(
+                "INSERT INTO email_account_limits(account_email,max_outbound_per_24h,updated_at) VALUES (?,?,datetime('now')) "
+                "ON CONFLICT(account_email) DO UPDATE SET max_outbound_per_24h=excluded.max_outbound_per_24h,updated_at=datetime('now')",
+                (account, limit),
+            )
+        return {"status": "UPDATED", "account_email": account, "max_outbound_per_24h": limit}
+
+    if action == "suppression-clear":
+        _input(data, {"action", "account_email", "recipient_email", "user_confirmed"},
+               {"action", "account_email", "recipient_email", "user_confirmed"})
+        account = _email(data, "account_email")
+        recipient = _email(data, "recipient_email")
+        if data["user_confirmed"] is not True:
+            raise finance.DomainError("METRON_EMAIL_SUPPRESSION_CHANGE_REQUIRES_USER")
+        with store.transaction(db):
+            result = db.execute(
+                "DELETE FROM email_contact_suppressions WHERE account_email=? AND recipient_email=?",
+                (account, recipient),
+            )
+        return {"status": "CLEARED" if result.rowcount else "NOT_SUPPRESSED", "account_email": account, "recipient_email": recipient}
+
     if action == "conversation-list":
         _input(data, {"action", "account_email"}, {"action", "account_email"})
         account = _email(data, "account_email")
@@ -188,12 +245,14 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
                     raise finance.DomainError("METRON_DEAL_NOT_FOUND")
                 next_thread = row["gmail_thread_id"] or thread
                 state = requested_state or row["state"]
-                if row["state"] == "OPTED_OUT" and state != "OPTED_OUT":
+                if row["state"] == "OPTED_OUT" and state != "OPTED_OUT" and _is_suppressed(db, account, customer):
                     raise finance.DomainError("METRON_EMAIL_OPTED_OUT")
                 db.execute(
                     "UPDATE email_conversations SET gmail_thread_id=?,state=?,deal_id=?,context_json=CASE WHEN ? THEN ? ELSE context_json END,next_follow_up_at=CASE WHEN ? THEN ? ELSE next_follow_up_at END,updated_at=datetime('now') WHERE id=?",
                     (next_thread, state, deal_id, has_context, context, has_next_follow_up, next_follow_up, row["id"]),
                 )
+                if requested_state == "OPTED_OUT":
+                    _record_opt_out(db, account, customer, next_thread)
                 return {"status": "UPDATED", "conversation_id": row["id"], "gmail_thread_id": next_thread, "state": state}
             deal_id = data.get("deal_id")
             if deal_id is not None and not db.execute("SELECT 1 FROM deals WHERE id=?", (deal_id,)).fetchone():
@@ -205,6 +264,8 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
                 "VALUES (?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))",
                 (conversation_id, account, key, thread, customer, state, deal_id, context, next_follow_up),
             )
+            if requested_state == "OPTED_OUT":
+                _record_opt_out(db, account, customer, thread)
             return {"status": "CREATED", "conversation_id": conversation_id, "gmail_thread_id": thread, "state": state}
 
     if action == "conversation-update":
@@ -225,7 +286,8 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
         with store.transaction(db):
             _lock(db, account, owner)
             row = _conversation(db, account, conversation_id)
-            if row["state"] == "OPTED_OUT" and state != "OPTED_OUT":
+            next_state = state or row["state"]
+            if row["state"] == "OPTED_OUT" and next_state != "OPTED_OUT" and _is_suppressed(db, account, row["customer_email"]):
                 raise finance.DomainError("METRON_EMAIL_OPTED_OUT")
             deal_id = data.get("deal_id", row["deal_id"])
             if deal_id is not None and not db.execute("SELECT 1 FROM deals WHERE id=?", (deal_id,)).fetchone():
@@ -234,6 +296,8 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
                 "UPDATE email_conversations SET state=COALESCE(?,state),deal_id=?,context_json=COALESCE(?,context_json),next_follow_up_at=CASE WHEN ? THEN ? ELSE next_follow_up_at END,updated_at=datetime('now') WHERE id=?",
                 (state, deal_id, context, has_next_follow_up, next_follow_up, conversation_id),
             )
+            if state == "OPTED_OUT":
+                _record_opt_out(db, account, row["customer_email"], row["gmail_thread_id"])
             return {"status": "UPDATED", "conversation_id": conversation_id, "state": state or row["state"]}
 
     if action == "message-claim":
@@ -328,10 +392,10 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
         with store.transaction(db):
             _lock(db, account, owner)
             conversation = _conversation(db, account, conversation_id)
-            if conversation["state"] == "OPTED_OUT":
-                raise finance.DomainError("METRON_EMAIL_OPTED_OUT")
             if recipient != conversation["customer_email"]:
                 raise finance.DomainError("METRON_EMAIL_IDENTITY_MISMATCH")
+            if conversation["state"] == "OPTED_OUT" or _is_suppressed(db, account, recipient):
+                raise finance.DomainError("METRON_EMAIL_OPTED_OUT")
             if kind == "REPLY":
                 inbound = db.execute(
                     "SELECT 1 FROM email_messages WHERE account_email=? AND gmail_message_id=? AND conversation_id=? AND direction='INBOUND'",
@@ -397,9 +461,21 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
                 if attempt["status"] != "PREPARED":
                     raise finance.DomainError("METRON_EMAIL_SEND_UNRESOLVED")
                 conversation = _conversation(db, account, attempt["conversation_id"])
-                if conversation["state"] == "OPTED_OUT":
+                if conversation["state"] == "OPTED_OUT" or _is_suppressed(db, account, attempt["recipient_email"]):
                     db.execute("UPDATE email_send_attempts SET status='FAILED',updated_at=datetime('now'),error_code='METRON_EMAIL_OPTED_OUT' WHERE id=?", (attempt["id"],))
                     return {"status": "FAILED", "attempt_id": attempt["id"], "error_code": "METRON_EMAIL_OPTED_OUT"}
+                configured_limit = db.execute(
+                    "SELECT max_outbound_per_24h FROM email_account_limits WHERE account_email=?", (account,)
+                ).fetchone()
+                limit = configured_limit["max_outbound_per_24h"] if configured_limit else DEFAULT_OUTBOUND_PER_24H
+                sent_recently = db.execute(
+                    "SELECT count(*) FROM email_send_attempts WHERE account_email=? AND "
+                    "((status='CONFIRMED' AND confirmed_at>=datetime('now','-24 hours')) OR "
+                    "(status IN ('SUBMITTING','UNKNOWN') AND updated_at>=datetime('now','-24 hours'))) ",
+                    (account,),
+                ).fetchone()[0]
+                if sent_recently >= limit:
+                    return {"status": "PREPARED", "attempt_id": attempt["id"], "error_code": "METRON_EMAIL_SEND_LIMIT_REACHED", "max_outbound_per_24h": limit}
                 db.execute("UPDATE email_send_attempts SET status='SUBMITTING',updated_at=datetime('now') WHERE id=? AND status='PREPARED'", (attempt["id"],))
                 return {"status": "SUBMITTING", "attempt_id": attempt["id"]}
             if action == "send-unknown":
@@ -461,6 +537,20 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
             "SELECT id,action_key,conversation_id,action_kind,source_message_id,recipient_email,status,gmail_message_id,gmail_thread_id,error_code,updated_at FROM email_send_attempts WHERE account_email=? ORDER BY updated_at DESC LIMIT 200",
             (account,),
         ).fetchall()]
-        return {"conversations": conversations, "messages": messages, "send_attempts": attempts}
+        suppressed = [dict(row) for row in db.execute(
+            "SELECT recipient_email,source_thread_id,opted_out_at FROM email_contact_suppressions WHERE account_email=? ORDER BY opted_out_at DESC",
+            (account,),
+        ).fetchall()]
+        configured_limit = db.execute(
+            "SELECT max_outbound_per_24h FROM email_account_limits WHERE account_email=?", (account,)
+        ).fetchone()
+        return {
+            "conversations": conversations,
+            "messages": messages,
+            "send_attempts": attempts,
+            "suppressed_contacts": suppressed,
+            "max_outbound_per_24h": configured_limit["max_outbound_per_24h"] if configured_limit else DEFAULT_OUTBOUND_PER_24H,
+            "send_limit_configured": configured_limit is not None,
+        }
 
     raise finance.DomainError("METRON_INVALID_INPUT")
