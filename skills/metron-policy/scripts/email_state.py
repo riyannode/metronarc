@@ -17,6 +17,7 @@ STATES = {
     "HUMAN_APPROVED", "HUMAN_REJECTED", "INVOICED", "CLOSED_WON", "CLOSED_LOST", "OPTED_OUT",
 }
 DEFAULT_OUTBOUND_PER_24H = 10
+NO_ACTION_CODES = {"AUTOMATED_MESSAGE", "DUPLICATE_CONTEXT", "OPT_OUT", "OUT_OF_SCOPE"}
 
 
 def _input(data: dict, allowed: set[str], required: set[str] = frozenset()) -> None:
@@ -45,6 +46,25 @@ def _json_object(value: object, maximum: int = 16000) -> str:
     if len(encoded.encode("utf-8")) > maximum:
         raise finance.DomainError("METRON_INVALID_INPUT")
     return encoded
+
+
+def _blocker_details(value: object) -> str:
+    if not isinstance(value, dict) or set(value) != {"missing", "next_action"}:
+        raise finance.DomainError("METRON_INVALID_INPUT")
+    missing = value["missing"]
+    if not isinstance(missing, list) or not 1 <= len(missing) <= 8:
+        raise finance.DomainError("METRON_INVALID_INPUT")
+    normalized = []
+    for item in missing:
+        if not isinstance(item, str) or not item.strip() or len(item.strip()) > 128:
+            raise finance.DomainError("METRON_INVALID_INPUT")
+        normalized.append(item.strip())
+    if len(set(normalized)) != len(normalized):
+        raise finance.DomainError("METRON_INVALID_INPUT")
+    next_action = value["next_action"]
+    if not isinstance(next_action, str) or not next_action.strip() or len(next_action.strip()) > 512:
+        raise finance.DomainError("METRON_INVALID_INPUT")
+    return _json_object({"missing": normalized, "next_action": next_action.strip()}, 2048)
 
 
 def _timestamp(value: object) -> str | None:
@@ -341,7 +361,25 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
             if row:
                 if row["gmail_thread_id"] != thread or row["conversation_id"] != conversation["id"] or row["direction"] != "INBOUND":
                     raise finance.DomainError("METRON_EMAIL_IDENTITY_MISMATCH")
+                blocker = db.execute(
+                    "SELECT status FROM email_message_events WHERE account_email=? AND gmail_message_id=? AND event_type='BLOCKER'",
+                    (account, message_id),
+                ).fetchone()
+                if blocker and blocker["status"] == "OPEN":
+                    return {"status": "BLOCKED_COMMERCIAL_POLICY", "conversation_id": conversation["id"]}
                 if row["status"] == "PROCESSED":
+                    if blocker and blocker["status"] == "RESOLVED":
+                        prior_reply = db.execute(
+                            "SELECT 1 FROM email_send_attempts WHERE account_email=? AND source_message_id=? AND action_kind='REPLY' LIMIT 1",
+                            (account, message_id),
+                        ).fetchone()
+                        if prior_reply:
+                            return {"status": "DUPLICATE_ACTION_EXISTS", "conversation_id": conversation["id"]}
+                        db.execute(
+                            "UPDATE email_messages SET status='PROCESSING',claimed_by=?,lease_until=datetime('now',?),error_code=NULL WHERE id=?",
+                            (owner, f"+{lease} seconds", row["id"]),
+                        )
+                        return {"status": "RECOVERED", "conversation_id": conversation["id"]}
                     return {"status": "DUPLICATE", "conversation_id": conversation["id"]}
                 if row["status"] == "PROCESSING" and row["claimed_by"] == owner:
                     return {"status": "ALREADY_CLAIMED", "conversation_id": conversation["id"]}
@@ -365,9 +403,11 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
             return {"status": "CLAIMED", "conversation_id": conversation["id"]}
 
     if action in {"message-complete", "message-fail"}:
-        allowed = {"action", "account_email", "owner_token", "gmail_message_id", "error_code"}
+        allowed = {"action", "account_email", "owner_token", "gmail_message_id", "error_code", "no_action_code"}
         required = {"action", "account_email", "owner_token", "gmail_message_id"}
         _input(data, allowed, required)
+        if action == "message-fail" and "no_action_code" in data:
+            raise finance.DomainError("METRON_INVALID_INPUT")
         account = _email(data, "account_email")
         owner = _text(data, "owner_token", 128)
         message_id = _text(data, "gmail_message_id", 512)
@@ -389,11 +429,142 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
             if unresolved:
                 raise finance.DomainError("METRON_EMAIL_SEND_UNRESOLVED")
             if action == "message-complete":
+                confirmed_reply = db.execute(
+                    "SELECT id FROM email_send_attempts WHERE account_email=? AND source_message_id=? AND action_kind='REPLY' AND status='CONFIRMED' LIMIT 1",
+                    (account, message_id),
+                ).fetchone()
+                blocker = db.execute(
+                    "SELECT status FROM email_message_events WHERE account_email=? AND gmail_message_id=? AND event_type='BLOCKER'",
+                    (account, message_id),
+                ).fetchone()
+                if confirmed_reply:
+                    db.execute(
+                        "INSERT OR IGNORE INTO email_message_events(id,account_email,gmail_message_id,conversation_id,event_type,reason_code,details_json,created_at,updated_at) "
+                        "VALUES (?,?,?,?,'REPLY_CONFIRMED','GMAIL_REPLY_CONFIRMED',?,datetime('now'),datetime('now'))",
+                        (str(uuid.uuid4()), account, message_id, row["conversation_id"], _json_object({"send_attempt_id": confirmed_reply["id"]})),
+                    )
+                elif blocker and blocker["status"] == "OPEN":
+                    pass
+                elif "no_action_code" in data:
+                    reason = _text(data, "no_action_code", 64)
+                    if reason not in NO_ACTION_CODES:
+                        raise finance.DomainError("METRON_INVALID_INPUT")
+                    details = "{}"
+                    db.execute(
+                        "INSERT OR IGNORE INTO email_message_events(id,account_email,gmail_message_id,conversation_id,event_type,reason_code,details_json,created_at,updated_at) "
+                        "VALUES (?,?,?,?,'NO_ACTION',?,?,datetime('now'),datetime('now'))",
+                        (str(uuid.uuid4()), account, message_id, row["conversation_id"], reason, details),
+                    )
+                else:
+                    raise finance.DomainError("METRON_EMAIL_ACTION_REQUIRED")
                 db.execute("UPDATE email_messages SET status='PROCESSED',processed_at=datetime('now'),lease_until=NULL WHERE id=?", (row["id"],))
                 return {"status": "PROCESSED"}
             error = _text(data, "error_code", 128) if data.get("error_code") else "METRON_EMAIL_PROCESSING_FAILED"
             db.execute("UPDATE email_messages SET status='FAILED',error_code=?,lease_until=NULL WHERE id=?", (error, row["id"]))
             return {"status": "FAILED", "error_code": error}
+
+    if action == "blocker-record":
+        _input(data, {"action", "account_email", "owner_token", "gmail_message_id", "blocker_code", "details"},
+               {"action", "account_email", "owner_token", "gmail_message_id", "blocker_code", "details"})
+        account = _email(data, "account_email")
+        owner = _text(data, "owner_token", 128)
+        message_id = _text(data, "gmail_message_id", 512)
+        code = _text(data, "blocker_code", 64)
+        if not re.fullmatch(r"[A-Z][A-Z0-9_]*", code):
+            raise finance.DomainError("METRON_INVALID_INPUT")
+        details = _blocker_details(data["details"])
+        with store.transaction(db):
+            _lock(db, account, owner)
+            message = db.execute(
+                "SELECT * FROM email_messages WHERE account_email=? AND gmail_message_id=? AND direction='INBOUND'",
+                (account, message_id),
+            ).fetchone()
+            if message is None:
+                raise finance.DomainError("METRON_EMAIL_MESSAGE_NOT_FOUND")
+            if message["status"] == "PROCESSING" and message["claimed_by"] != owner:
+                raise finance.DomainError("METRON_EMAIL_MESSAGE_LOCKED")
+            if message["status"] not in {"PROCESSING", "PROCESSED"}:
+                raise finance.DomainError("METRON_EMAIL_MESSAGE_LOCKED")
+            prior_attempt = db.execute(
+                "SELECT status FROM email_send_attempts WHERE account_email=? AND source_message_id=? AND action_kind='REPLY' LIMIT 1",
+                (account, message_id),
+            ).fetchone()
+            if prior_attempt and prior_attempt["status"] != "FAILED":
+                raise finance.DomainError("METRON_EMAIL_REPLY_ALREADY_ATTEMPTED")
+            existing = db.execute(
+                "SELECT * FROM email_message_events WHERE account_email=? AND gmail_message_id=? AND event_type='BLOCKER'",
+                (account, message_id),
+            ).fetchone()
+            if existing:
+                if existing["reason_code"] != code or existing["details_json"] != details:
+                    raise finance.DomainError("METRON_EMAIL_BLOCKER_CONFLICT")
+                if message["status"] == "PROCESSING":
+                    db.execute(
+                        "UPDATE email_messages SET status='PROCESSED',processed_at=datetime('now'),lease_until=NULL WHERE id=?",
+                        (message["id"],),
+                    )
+                return {"status": "EXISTS", "blocker_id": existing["id"], "reported": existing["reported_at"] is not None}
+            event_id = str(uuid.uuid4())
+            db.execute(
+                "INSERT INTO email_message_events(id,account_email,gmail_message_id,conversation_id,event_type,reason_code,details_json,status,created_at,updated_at) "
+                "VALUES (?,?,?,?,'BLOCKER',?,?, 'OPEN',datetime('now'),datetime('now'))",
+                (event_id, account, message_id, message["conversation_id"], code, details),
+            )
+            if message["status"] == "PROCESSING":
+                db.execute(
+                    "UPDATE email_messages SET status='PROCESSED',processed_at=datetime('now'),lease_until=NULL WHERE id=?",
+                    (message["id"],),
+                )
+            return {"status": "RECORDED", "blocker_id": event_id, "reported": False}
+
+    if action == "blocker-report":
+        _input(data, {"action", "account_email", "owner_token"}, {"action", "account_email", "owner_token"})
+        account = _email(data, "account_email")
+        owner = _text(data, "owner_token", 128)
+        with store.transaction(db):
+            _lock(db, account, owner)
+            rows = db.execute(
+                "SELECT e.id,e.gmail_message_id,e.conversation_id,e.reason_code,e.details_json,e.created_at,c.gmail_thread_id,c.customer_email "
+                "FROM email_message_events e JOIN email_conversations c ON c.id=e.conversation_id "
+                "WHERE e.account_email=? AND e.event_type='BLOCKER' AND e.status='OPEN' AND e.reported_at IS NULL ORDER BY e.created_at",
+                (account,),
+            ).fetchall()
+            if rows:
+                ids = [row["id"] for row in rows]
+                db.executemany("UPDATE email_message_events SET reported_at=datetime('now'),updated_at=datetime('now') WHERE id=?", [(item,) for item in ids])
+            blockers = [
+                {**dict(row), "details": json.loads(row["details_json"])} for row in rows
+            ]
+            for blocker in blockers:
+                blocker.pop("details_json")
+            return {"status": "REPORTED" if blockers else "NO_PENDING_BLOCKERS", "blockers": blockers}
+
+    if action == "blocker-resolve":
+        _input(data, {"action", "account_email", "owner_token", "gmail_message_id", "policy_fingerprint"},
+               {"action", "account_email", "owner_token", "gmail_message_id", "policy_fingerprint"})
+        account = _email(data, "account_email")
+        owner = _text(data, "owner_token", 128)
+        message_id = _text(data, "gmail_message_id", 512)
+        fingerprint = _text(data, "policy_fingerprint", 64).lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+            raise finance.DomainError("METRON_INVALID_INPUT")
+        with store.transaction(db):
+            _lock(db, account, owner)
+            blocker = db.execute(
+                "SELECT * FROM email_message_events WHERE account_email=? AND gmail_message_id=? AND event_type='BLOCKER'",
+                (account, message_id),
+            ).fetchone()
+            if blocker is None:
+                raise finance.DomainError("METRON_EMAIL_BLOCKER_NOT_FOUND")
+            if blocker["status"] == "RESOLVED":
+                if blocker["policy_fingerprint"] != fingerprint:
+                    raise finance.DomainError("METRON_EMAIL_BLOCKER_RESOLUTION_CONFLICT")
+                return {"status": "ALREADY_RESOLVED", "blocker_id": blocker["id"]}
+            db.execute(
+                "UPDATE email_message_events SET status='RESOLVED',policy_fingerprint=?,updated_at=datetime('now') WHERE id=?",
+                (fingerprint, blocker["id"]),
+            )
+            return {"status": "RESOLVED", "blocker_id": blocker["id"], "policy_fingerprint": fingerprint}
 
     if action == "send-prepare":
         _input(data, {"action", "account_email", "owner_token", "conversation_id", "action_key", "action_kind", "source_message_id", "invoice_id", "recipient_email", "content_sha256"},
@@ -565,6 +736,16 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
             "SELECT gmail_message_id,gmail_thread_id,conversation_id,direction,status,received_at,processed_at,error_code FROM email_messages WHERE account_email=? ORDER BY received_at DESC LIMIT 200",
             (account,),
         ).fetchall()]
+        message_events = [
+            {**dict(row), "details": json.loads(row["details_json"])}
+            for row in db.execute(
+                "SELECT id,gmail_message_id,conversation_id,event_type,reason_code,details_json,status,policy_fingerprint,reported_at,created_at,updated_at "
+                "FROM email_message_events WHERE account_email=? ORDER BY created_at DESC LIMIT 200",
+                (account,),
+            ).fetchall()
+        ]
+        for event in message_events:
+            event.pop("details_json")
         attempts = [dict(row) for row in db.execute(
             "SELECT id,action_key,conversation_id,action_kind,invoice_id,source_message_id,recipient_email,status,gmail_message_id,gmail_thread_id,error_code,updated_at FROM email_send_attempts WHERE account_email=? ORDER BY updated_at DESC LIMIT 200",
             (account,),
@@ -579,6 +760,7 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
         return {
             "conversations": conversations,
             "messages": messages,
+            "message_events": message_events,
             "send_attempts": attempts,
             "suppressed_contacts": suppressed,
             "max_outbound_per_24h": configured_limit["max_outbound_per_24h"] if configured_limit else DEFAULT_OUTBOUND_PER_24H,

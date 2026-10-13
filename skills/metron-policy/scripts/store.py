@@ -128,6 +128,17 @@ CREATE TABLE IF NOT EXISTS email_messages (
   claimed_by TEXT, lease_until TEXT, received_at TEXT NOT NULL, processed_at TEXT, error_code TEXT,
   UNIQUE(account_email,gmail_message_id)
 );
+CREATE TABLE IF NOT EXISTS email_message_events (
+  id TEXT PRIMARY KEY, account_email TEXT NOT NULL, gmail_message_id TEXT NOT NULL,
+  conversation_id TEXT NOT NULL REFERENCES email_conversations(id),
+  event_type TEXT NOT NULL CHECK (event_type IN ('BLOCKER','NO_ACTION','REPLY_CONFIRMED')),
+  reason_code TEXT NOT NULL, details_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT CHECK (status IN ('OPEN','RESOLVED')),
+  policy_fingerprint TEXT, reported_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  CHECK ((event_type='BLOCKER' AND status IS NOT NULL) OR (event_type!='BLOCKER' AND status IS NULL)),
+  UNIQUE(account_email,gmail_message_id,event_type),
+  FOREIGN KEY(account_email,gmail_message_id) REFERENCES email_messages(account_email,gmail_message_id)
+);
 CREATE TABLE IF NOT EXISTS email_send_attempts (
   id TEXT PRIMARY KEY, account_email TEXT NOT NULL, action_key TEXT NOT NULL,
   conversation_id TEXT NOT NULL REFERENCES email_conversations(id), action_kind TEXT NOT NULL CHECK (action_kind IN ('OUTREACH','REPLY','FOLLOW_UP','INVOICE')),
@@ -146,6 +157,7 @@ CREATE INDEX IF NOT EXISTS idx_spend_intents_goal_status ON spend_intents(goal_i
 CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_email_messages_thread ON email_messages(account_email,gmail_thread_id,received_at);
 CREATE INDEX IF NOT EXISTS idx_email_messages_processing ON email_messages(account_email,status,lease_until);
+CREATE INDEX IF NOT EXISTS idx_email_message_events_pending ON email_message_events(account_email,event_type,status,reported_at);
 CREATE INDEX IF NOT EXISTS idx_email_send_unresolved ON email_send_attempts(account_email,status);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_email_one_outreach_per_recipient
   ON email_send_attempts(account_email,recipient_email) WHERE action_kind='OUTREACH';

@@ -298,6 +298,156 @@ class InvoiceWorkflowTest(unittest.TestCase):
         )
         self.assertEqual(json.loads(duplicate_delivery.stdout)["error"]["code"], "METRON_EMAIL_ACTION_CONFLICT")
 
+    def test_message_completion_requires_a_reply_or_persisted_blocker(self) -> None:
+        account = "operator@example.invalid"
+        owner = self.call("email-state", data={"action": "run-acquire", "account_email": account})["owner_token"]
+        conversation = self.call(
+            "email-state",
+            data={"action": "conversation-upsert", "account_email": account, "owner_token": owner,
+                  "conversation_key": "actionable-message", "gmail_thread_id": "actionable-thread",
+                  "customer_email": "billing@example.invalid", "state": "NEGOTIATING"},
+        )
+        message_id = "actionable-message-id"
+        claimed = self.call(
+            "email-state",
+            data={"action": "message-claim", "account_email": account, "owner_token": owner,
+                  "gmail_message_id": message_id, "gmail_thread_id": "actionable-thread",
+                  "customer_email": "billing@example.invalid"},
+        )
+        self.assertEqual(claimed["status"], "CLAIMED")
+
+        silent_completion = subprocess.run(
+            [sys.executable, "-B", str(CLI), "email-state", "--input",
+             str(self.write_request({"action": "message-complete", "account_email": account,
+                                     "owner_token": owner, "gmail_message_id": message_id}))],
+            env=self.env, capture_output=True, text=True,
+        )
+        self.assertEqual(json.loads(silent_completion.stdout)["error"]["code"], "METRON_EMAIL_ACTION_REQUIRED")
+
+        blocker = self.call(
+            "email-state",
+            data={"action": "blocker-record", "account_email": account, "owner_token": owner,
+                  "gmail_message_id": message_id, "blocker_code": "COMMERCIAL_POLICY_UNAVAILABLE",
+                  "details": {"missing": ["verified price", "available capacity", "delivery timeline"],
+                              "next_action": "Configure the commercial policy."}},
+        )
+        self.assertEqual(blocker["status"], "RECORDED")
+        duplicate_blocker = self.call(
+            "email-state",
+            data={"action": "blocker-record", "account_email": account, "owner_token": owner,
+                  "gmail_message_id": message_id, "blocker_code": "COMMERCIAL_POLICY_UNAVAILABLE",
+                  "details": {"missing": ["verified price", "available capacity", "delivery timeline"],
+                              "next_action": "Configure the commercial policy."}},
+        )
+        self.assertEqual(duplicate_blocker["status"], "EXISTS")
+        completed = self.call(
+            "email-state",
+            data={"action": "message-complete", "account_email": account,
+                  "owner_token": owner, "gmail_message_id": message_id},
+        )
+        self.assertEqual(completed["status"], "ALREADY_PROCESSED")
+
+        notification = self.call("email-state", data={"action": "blocker-report", "account_email": account,
+                                                        "owner_token": owner})
+        self.assertEqual(len(notification["blockers"]), 1)
+        self.assertEqual(notification["blockers"][0]["gmail_message_id"], message_id)
+        self.assertEqual(self.call("email-state", data={"action": "blocker-report", "account_email": account,
+                                                         "owner_token": owner})["blockers"], [])
+
+    def test_non_actionable_message_requires_explicit_durable_reason(self) -> None:
+        account = "operator@example.invalid"
+        owner = self.call("email-state", data={"action": "run-acquire", "account_email": account})["owner_token"]
+        conversation = self.call("email-state", data={"action": "conversation-upsert", "account_email": account,
+                                                       "owner_token": owner, "conversation_key": "opt-out",
+                                                       "gmail_thread_id": "opt-out-thread",
+                                                       "customer_email": "billing@example.invalid", "state": "ACTIVE"})
+        message_id = "opt-out-message"
+        self.call("email-state", data={"action": "message-claim", "account_email": account, "owner_token": owner,
+                                       "gmail_message_id": message_id, "gmail_thread_id": "opt-out-thread",
+                                       "customer_email": "billing@example.invalid"})
+        self.call("email-state", data={"action": "conversation-update", "account_email": account,
+                                       "owner_token": owner, "conversation_id": conversation["conversation_id"],
+                                       "state": "OPTED_OUT"})
+        completed = self.call("email-state", data={"action": "message-complete", "account_email": account,
+                                                    "owner_token": owner, "gmail_message_id": message_id,
+                                                    "no_action_code": "OPT_OUT"})
+        self.assertEqual(completed["status"], "PROCESSED")
+        events = self.call("email-state", data={"action": "state-list", "account_email": account})["message_events"]
+        self.assertEqual([(event["event_type"], event["reason_code"]) for event in events], [("NO_ACTION", "OPT_OUT")])
+
+    def test_processed_blocker_recovers_once_after_policy_resolution_and_restart(self) -> None:
+        account = "operator@example.invalid"
+        first_owner = self.call("email-state", data={"action": "run-acquire", "account_email": account})["owner_token"]
+        conversation = self.call(
+            "email-state",
+            data={"action": "conversation-upsert", "account_email": account, "owner_token": first_owner,
+                  "conversation_key": "legacy-processed", "gmail_thread_id": "legacy-thread",
+                  "customer_email": "billing@example.invalid", "state": "NEGOTIATING"},
+        )
+        message_id = "legacy-processed-message"
+        self.call("email-state", data={"action": "message-claim", "account_email": account,
+                                       "owner_token": first_owner, "gmail_message_id": message_id,
+                                       "gmail_thread_id": "legacy-thread", "customer_email": "billing@example.invalid"})
+
+        with sqlite3.connect(self.home / "metron.sqlite") as db:
+            db.execute("UPDATE email_messages SET status='PROCESSED',processed_at=datetime('now'),claimed_by=NULL,lease_until=NULL "
+                       "WHERE account_email=? AND gmail_message_id=?", (account, message_id))
+
+        blocked = self.call("email-state", data={"action": "message-claim", "account_email": account,
+                                                  "owner_token": first_owner, "gmail_message_id": message_id,
+                                                  "gmail_thread_id": "legacy-thread", "customer_email": "billing@example.invalid"})
+        self.assertEqual(blocked["status"], "DUPLICATE")
+        blocker = self.call("email-state", data={"action": "blocker-record", "account_email": account,
+                                                  "owner_token": first_owner, "gmail_message_id": message_id,
+                                                  "blocker_code": "COMMERCIAL_POLICY_UNAVAILABLE",
+                                                  "details": {"missing": ["verified quote"],
+                                                              "next_action": "Configure the commercial policy."}})
+        self.assertEqual(blocker["status"], "RECORDED")
+        self.assertEqual(self.call("email-state", data={"action": "run-release", "account_email": account,
+                                                         "owner_token": first_owner})["status"], "RELEASED")
+
+        second_owner = self.call("email-state", data={"action": "run-acquire", "account_email": account})["owner_token"]
+        still_blocked = self.call("email-state", data={"action": "message-claim", "account_email": account,
+                                                        "owner_token": second_owner, "gmail_message_id": message_id,
+                                                        "gmail_thread_id": "legacy-thread", "customer_email": "billing@example.invalid"})
+        self.assertEqual(still_blocked["status"], "BLOCKED_COMMERCIAL_POLICY")
+        self.call("email-state", data={"action": "blocker-resolve", "account_email": account,
+                                       "owner_token": second_owner, "gmail_message_id": message_id,
+                                       "policy_fingerprint": "c" * 64})
+        recovered = self.call("email-state", data={"action": "message-claim", "account_email": account,
+                                                    "owner_token": second_owner, "gmail_message_id": message_id,
+                                                    "gmail_thread_id": "legacy-thread", "customer_email": "billing@example.invalid"})
+        self.assertEqual(recovered["status"], "RECOVERED")
+
+        self.call("email-state", data={"action": "run-release", "account_email": account, "owner_token": second_owner})
+        third_owner = self.call("email-state", data={"action": "run-acquire", "account_email": account})["owner_token"]
+        restarted = self.call("email-state", data={"action": "message-claim", "account_email": account,
+                                                    "owner_token": third_owner, "gmail_message_id": message_id,
+                                                    "gmail_thread_id": "legacy-thread", "customer_email": "billing@example.invalid"})
+        self.assertEqual(restarted["status"], "RECLAIMED")
+
+        prepared = self.call("email-state", data={"action": "send-prepare", "account_email": account,
+                                                  "owner_token": third_owner, "conversation_id": conversation["conversation_id"],
+                                                  "action_key": f"reply:{message_id}", "action_kind": "REPLY",
+                                                  "source_message_id": message_id, "recipient_email": "billing@example.invalid",
+                                                  "content_sha256": "d" * 64})
+        self.assertEqual(prepared["status"], "PREPARED")
+        started = self.call("email-state", data={"action": "send-start", "account_email": account,
+                                                  "owner_token": third_owner, "action_key": f"reply:{message_id}"})
+        self.assertEqual(started["status"], "SUBMITTING")
+        self.call("email-state", data={"action": "send-confirm", "account_email": account,
+                                       "owner_token": third_owner, "action_key": f"reply:{message_id}",
+                                       "gmail_message_id": "recovered-reply-id", "gmail_thread_id": "legacy-thread",
+                                       "confirmation_source": "send_response"})
+        self.assertEqual(self.call("email-state", data={"action": "message-complete", "account_email": account,
+                                                         "owner_token": third_owner, "gmail_message_id": message_id})["status"], "PROCESSED")
+        duplicate = self.call("email-state", data={"action": "message-claim", "account_email": account,
+                                                    "owner_token": third_owner, "gmail_message_id": message_id,
+                                                    "gmail_thread_id": "legacy-thread", "customer_email": "billing@example.invalid"})
+        self.assertEqual(duplicate["status"], "DUPLICATE_ACTION_EXISTS")
+        attempts = self.call("email-state", data={"action": "state-list", "account_email": account})["send_attempts"]
+        self.assertEqual(len([item for item in attempts if item["source_message_id"] == message_id]), 1)
+
     def test_existing_email_outbox_rows_survive_the_invoice_action_migration(self) -> None:
         account = "operator@example.invalid"
         owner = self.call("email-state", data={"action": "run-acquire", "account_email": account})["owner_token"]
