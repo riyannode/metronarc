@@ -263,6 +263,82 @@ def record_spend_result(db: sqlite3.Connection, intent_id: str, result: dict, ex
     return {"id":entry_id,"evidence_id":evidence_id,"journal_id":journal,"status":"CONFIRMED"}
 
 
+def _verify_commercial_service_terms(
+    db: sqlite3.Connection, amount: int, terms: dict, customer_email: str | None,
+    expected_deal_id: str | None = None, expected_service_id: str | None = None,
+) -> str | None:
+    service = terms.get("commercial_service")
+    if service is None:
+        if terms.get("email_conversation_id") is not None or expected_service_id is not None:
+            raise DomainError("METRON_EMAIL_SERVICE_POLICY_STALE")
+        return None
+    if not isinstance(service, dict):
+        raise DomainError("METRON_INVALID_DEAL")
+    account = service.get("account_email")
+    service_id = service.get("service_id")
+    if not isinstance(account, str) or not isinstance(service_id, str):
+        raise DomainError("METRON_INVALID_DEAL")
+    if expected_service_id is not None and service_id != expected_service_id:
+        raise DomainError("METRON_EMAIL_SERVICE_POLICY_STALE")
+    current = store.email_service_policy(db, account, service_id)
+    if current is None:
+        raise DomainError("METRON_EMAIL_SERVICE_POLICY_STALE")
+    policy, fingerprint = current
+    if not policy["active"]:
+        raise DomainError("METRON_EMAIL_SERVICE_UNAVAILABLE")
+    if service != {**policy, "policy_fingerprint": fingerprint}:
+        raise DomainError("METRON_EMAIL_SERVICE_POLICY_STALE")
+    conversation_id = terms.get("email_conversation_id")
+    conversation = db.execute(
+        "SELECT id,account_email,customer_email,commercial_service_id,deal_id,state FROM email_conversations WHERE id=?",
+        (conversation_id,),
+    ).fetchone() if isinstance(conversation_id, str) else None
+    if (
+        conversation is None or conversation["account_email"] != account
+        or conversation["customer_email"] != (customer_email or "").strip().lower()
+        or conversation["commercial_service_id"] != service_id
+        or (expected_deal_id is None and conversation["deal_id"] is not None)
+        or (expected_deal_id is not None and conversation["deal_id"] != expected_deal_id)
+    ):
+        raise DomainError("METRON_EMAIL_SERVICE_POLICY_STALE")
+    quantity = terms.get("quantity")
+    if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:
+        raise DomainError("METRON_EMAIL_OFFER_OUT_OF_POLICY")
+    if expected_deal_id is not None:
+        deal = db.execute(
+            "SELECT commercial_service_id,commercial_capacity_units FROM deals WHERE id=?", (expected_deal_id,)
+        ).fetchone()
+        if deal is None or deal["commercial_service_id"] != service_id or deal["commercial_capacity_units"] != quantity:
+            raise DomainError("METRON_EMAIL_SERVICE_POLICY_STALE")
+    remaining_capacity = store.email_service_remaining_capacity(
+        db, service_id, policy["available_capacity_units"], expected_deal_id
+    )
+    if remaining_capacity <= 0:
+        raise DomainError("METRON_EMAIL_SERVICE_UNAVAILABLE")
+    items = terms.get("line_items")
+    if (
+        quantity > remaining_capacity
+        or terms.get("service_description") != policy["service_scope"]
+        or terms.get("deliverables") != policy["deliverables"]
+        or terms.get("delivery_days") != policy["delivery_days"]
+        or terms.get("capacity_unit") != policy["capacity_unit"]
+        or not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], dict)
+    ):
+        raise DomainError("METRON_EMAIL_OFFER_OUT_OF_POLICY")
+    item = items[0]
+    unit_price = item.get("unit_price_atomic")
+    item_quantity = item.get("quantity")
+    if (
+        item.get("description") != policy["service_name"]
+        or isinstance(item_quantity, bool) or item_quantity != quantity
+        or isinstance(unit_price, bool) or not isinstance(unit_price, int)
+        or not policy["minimum_acceptable_price_atomic"] <= unit_price <= policy["initial_asking_price_atomic"]
+        or amount != quantity * unit_price
+    ):
+        raise DomainError("METRON_EMAIL_OFFER_OUT_OF_POLICY")
+    return conversation["id"]
+
+
 def create_deal(db: sqlite3.Connection,data: dict) -> dict:
     timestamp=now(); goal_id=str(data.get("goal_id","")); name=str(data.get("customer","")); amount=atomic(data.get("amount"))
     if not name or amount<=0: raise DomainError("METRON_INVALID_DEAL")
@@ -273,20 +349,28 @@ def create_deal(db: sqlite3.Connection,data: dict) -> dict:
     if not isinstance(custom_or_legal_terms,bool): raise DomainError("METRON_INVALID_DEAL")
     terms=data.get("terms",{})
     if not isinstance(terms,dict): raise DomainError("METRON_INVALID_DEAL")
-    standard_terms={"payer_wallet","service_description","line_items","due_at","billing_name","billing_email","billing_address","tax_atomic","fee_atomic"}
+    standard_terms={"payer_wallet","service_description","line_items","due_at","billing_name","billing_email","billing_address","tax_atomic","fee_atomic","commercial_service","email_conversation_id","quantity","deliverables","delivery_days","capacity_unit"}
     custom_or_legal_terms=custom_or_legal_terms or any(key not in standard_terms for key in terms)
     payer=terms.get("payer_wallet")
     if payer is not None and (not isinstance(payer,str) or len(payer)!=42 or not payer.startswith("0x") or any(ch not in "0123456789abcdefABCDEF" for ch in payer[2:])):
         raise DomainError("METRON_INVALID_DEAL")
     with store.transaction(db):
         policy=require_goal(db,goal_id)
+        service_conversation_id = _verify_commercial_service_terms(
+            db, amount, terms, data.get("external_ref")
+        )
         if originating_spend_intent_id:
             origin=db.execute("SELECT goal_id FROM spend_intents WHERE id=?",(originating_spend_intent_id,)).fetchone()
             if origin is None: raise DomainError("METRON_SPEND_NOT_FOUND")
             if origin["goal_id"]!=goal_id: raise DomainError("METRON_RECONCILIATION_MISMATCH")
         cp=store.next_id(db,"counterparties","CP"); deal=store.next_id(db,"deals","DEAL")
         db.execute("INSERT INTO counterparties(id,kind,name,external_ref,created_at) VALUES (?,?,?,?,?)",(cp,"PROSPECT",name,data.get("external_ref"),timestamp))
-        db.execute("INSERT INTO deals(id,counterparty_id,goal_id,amount_atomic,currency,terms_json,custom_or_legal_terms,status,created_at,originating_spend_intent_id) VALUES (?,?,?,?,?,?,?,?,?,?)",(deal,cp,goal_id,amount,"USDC",json.dumps(terms,sort_keys=True),int(custom_or_legal_terms),"PROSPECTING",timestamp,originating_spend_intent_id))
+        service_id = terms["commercial_service"]["service_id"] if service_conversation_id else None
+        reserved_units = terms["quantity"] if service_conversation_id else 0
+        db.execute("INSERT INTO deals(id,counterparty_id,goal_id,amount_atomic,currency,terms_json,commercial_service_id,commercial_capacity_units,custom_or_legal_terms,status,created_at,originating_spend_intent_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",(deal,cp,goal_id,amount,"USDC",json.dumps(terms,sort_keys=True),service_id,reserved_units,int(custom_or_legal_terms),"PROSPECTING",timestamp,originating_spend_intent_id))
+        if service_conversation_id:
+            db.execute("UPDATE email_conversations SET deal_id=?,state='NEGOTIATING',updated_at=? WHERE id=?",
+                       (deal, timestamp, service_conversation_id))
         store.event(db,"DEAL_CREATED","deal",deal,"Deal created",{"counterparty_id":cp,"originating_spend_intent_id":originating_spend_intent_id},timestamp)
         if amount < policy["minimum_deal_atomic"]:
             store.event(db,"DEAL_BELOW_MINIMUM","deal",deal,"Deal value is below policy minimum",{},timestamp)
@@ -317,14 +401,21 @@ def get_deal(db: sqlite3.Connection, deal_id: str) -> dict:
 def accept_deal(db: sqlite3.Connection, deal_id: str) -> dict:
     timestamp=now()
     with store.transaction(db):
-        row=db.execute("SELECT d.*,p.minimum_deal_atomic FROM deals d JOIN policies p ON p.goal_id=d.goal_id WHERE d.id=?",(deal_id,)).fetchone()
+        row=db.execute("SELECT d.*,p.minimum_deal_atomic,c.external_ref FROM deals d JOIN policies p ON p.goal_id=d.goal_id JOIN counterparties c ON c.id=d.counterparty_id WHERE d.id=?",(deal_id,)).fetchone()
         if row is None: raise DomainError("METRON_DEAL_NOT_FOUND")
         if row["status"] != "NEGOTIATING": raise DomainError("METRON_INVALID_DEAL_TRANSITION")
+        terms = json.loads(row["terms_json"])
+        conversation_id = _verify_commercial_service_terms(
+            db, row["amount_atomic"], terms, row["external_ref"], deal_id, row["commercial_service_id"]
+        )
         if row["amount_atomic"]<row["minimum_deal_atomic"] and not row["minimum_deal_approved"]:
             raise DomainError("METRON_DEAL_BELOW_MINIMUM")
         if row["custom_or_legal_terms"] and not row["custom_terms_approved"]:
             raise DomainError("METRON_CUSTOM_TERMS_APPROVAL_REQUIRED")
         db.execute("UPDATE deals SET status='PENDING_HUMAN',accepted_at=? WHERE id=?",(timestamp,deal_id))
+        if conversation_id:
+            db.execute("UPDATE email_conversations SET state='PENDING_HUMAN',updated_at=? WHERE id=?",
+                       (timestamp, conversation_id))
         db.execute("UPDATE counterparties SET kind='CUSTOMER' WHERE id=?",(row["counterparty_id"],))
         store.event(db,"CUSTOMER_ACCEPTED","deal",deal_id,"Customer accepted terms; waiting for human approval",{},timestamp)
     return {"id":deal_id,"status":"PENDING_HUMAN"}
@@ -333,7 +424,7 @@ def accept_deal(db: sqlite3.Connection, deal_id: str) -> dict:
 def approve_deal(db: sqlite3.Connection, deal_id: str, approved: bool, payer_wallet: str | None=None) -> dict:
     timestamp=now(); status="HUMAN_APPROVED" if approved else "HUMAN_REJECTED"
     with store.transaction(db):
-        row=db.execute("SELECT d.*,p.minimum_deal_atomic FROM deals d JOIN policies p ON p.goal_id=d.goal_id WHERE d.id=?",(deal_id,)).fetchone()
+        row=db.execute("SELECT d.*,p.minimum_deal_atomic,c.external_ref FROM deals d JOIN policies p ON p.goal_id=d.goal_id JOIN counterparties c ON c.id=d.counterparty_id WHERE d.id=?",(deal_id,)).fetchone()
         if row is None: raise DomainError("METRON_DEAL_NOT_FOUND")
         if row["status"] == "NEGOTIATING":
             below_minimum=row["amount_atomic"]<row["minimum_deal_atomic"] and not row["minimum_deal_approved"]
@@ -357,6 +448,10 @@ def approve_deal(db: sqlite3.Connection, deal_id: str, approved: bool, payer_wal
         if row["status"] != "PENDING_HUMAN": raise DomainError("METRON_HUMAN_APPROVAL_REQUIRED")
         terms=json.loads(row["terms_json"])
         if approved:
+            if row["commercial_service_id"] is not None or terms.get("commercial_service") is not None:
+                _verify_commercial_service_terms(
+                    db, row["amount_atomic"], terms, row["external_ref"], deal_id, row["commercial_service_id"]
+                )
             payer=payer_wallet or terms.get("payer_wallet")
             if not isinstance(payer,str) or len(payer)!=42 or not payer.startswith("0x") or any(ch not in "0123456789abcdefABCDEF" for ch in payer[2:]):
                 raise DomainError("METRON_COUNTERPARTY_UNVERIFIED")

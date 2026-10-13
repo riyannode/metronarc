@@ -384,7 +384,7 @@ class InvoiceWorkflowTest(unittest.TestCase):
                                                         "delivery_reference": "visible-run-001"})
         self.assertEqual(repeated_ack["status"], "ALREADY_ACKNOWLEDGED")
 
-    def test_blocker_resolution_requires_verified_persisted_commercial_policy(self) -> None:
+    def test_blocker_resolution_requires_a_verified_active_service(self) -> None:
         account = "operator@example.invalid"
         owner = self.call("email-state", data={"action": "run-acquire", "account_email": account})["owner_token"]
         self.call("email-state", data={"action": "conversation-upsert", "account_email": account,
@@ -408,38 +408,34 @@ class InvoiceWorkflowTest(unittest.TestCase):
             return json.loads(result.stdout)
 
         unresolved = invoke({"action": "blocker-resolve", "account_email": account, "owner_token": owner,
-                             "gmail_message_id": message_id})
+                             "gmail_message_id": message_id, "service_id": "missing-service"})
         self.assertEqual(unresolved["error"]["code"], "METRON_EMAIL_COMMERCIAL_POLICY_REQUIRED")
         forged_hash = invoke({"action": "blocker-resolve", "account_email": account, "owner_token": owner,
-                             "gmail_message_id": message_id, "policy_fingerprint": "a" * 64})
+                             "gmail_message_id": message_id, "service_id": "missing-service",
+                             "policy_fingerprint": "a" * 64})
         self.assertEqual(forged_hash["error"]["code"], "METRON_INVALID_INPUT")
 
-        policy = {"action": "commercial-policy-set", "account_email": account, "owner_token": owner,
-                  "service_scope": "One Arc Testnet analytics report", "price_atomic": 12500000,
-                  "available_capacity_units": 2, "capacity_unit": "reports per week", "delivery_days": 5}
-        configured = self.call("email-state", data=policy)
-        canonical = {"account_email": account, "service_scope": policy["service_scope"],
-                     "price_atomic": 12500000, "available_capacity_units": 2, "capacity_unit": "reports per week",
-                     "delivery_days": 5, "currency": "USDC", "chain": "ARC-TESTNET"}
+        configured = self.set_service_policy(account, owner)
+        service_id = configured["service"]["service_id"]
+        canonical = dict(configured["service"])
+        canonical.pop("policy_fingerprint")
         expected = hashlib.sha256(json.dumps(canonical, sort_keys=True, separators=(",", ":"),
                                             ensure_ascii=False).encode()).hexdigest()
-        self.assertEqual(configured["policy_fingerprint"], expected)
-        readback = self.call("email-state", data={"action": "commercial-policy-get", "account_email": account})
-        self.assertEqual(readback["status"], "CONFIGURED")
-        self.assertEqual(readback["policy"], canonical)
-        self.assertEqual(readback["policy_fingerprint"], expected)
-        for field in ("price_atomic", "available_capacity_units", "delivery_days"):
-            incomplete_policy = dict(policy)
-            incomplete_policy[field] = 0
-            invalid = invoke(incomplete_policy)
-            self.assertEqual(invalid["error"]["code"], "METRON_EMAIL_COMMERCIAL_POLICY_REQUIRED")
+        self.assertEqual(configured["service"]["policy_fingerprint"], expected)
+        readback = self.call("email-state", data={"action": "service-list", "account_email": account})
+        self.assertEqual([item["service"]["service_id"] for item in readback["services"]], [service_id])
+        self.assertEqual(readback["services"][0]["service"]["policy_fingerprint"], expected)
+        incomplete_policy = self.service_policy_input(account, owner, minimum_acceptable_price_atomic=16000000)
+        invalid = invoke(incomplete_policy)
+        self.assertEqual(invalid["error"]["code"], "METRON_INVALID_INPUT")
         resolved = self.call("email-state", data={"action": "blocker-resolve", "account_email": account,
-                                                   "owner_token": owner, "gmail_message_id": message_id})
+                                                   "owner_token": owner, "gmail_message_id": message_id,
+                                                   "service_id": service_id})
         self.assertEqual(resolved["policy_fingerprint"], expected)
 
         with sqlite3.connect(self.home / "metron.sqlite") as db:
             db.execute("PRAGMA ignore_check_constraints=ON")
-            db.execute("UPDATE email_commercial_policies SET service_scope='' WHERE account_email=?", (account,))
+            db.execute("UPDATE email_services SET deliverables_json='[]' WHERE id=?", (service_id,))
         second_id = "incomplete-policy-message"
         self.call("email-state", data={"action": "message-claim", "account_email": account, "owner_token": owner,
                                        "gmail_message_id": second_id, "gmail_thread_id": "policy-thread",
@@ -449,8 +445,257 @@ class InvoiceWorkflowTest(unittest.TestCase):
                                        "details": {"missing": ["service scope"],
                                                    "next_action": "Configure the commercial policy."}})
         incomplete = invoke({"action": "blocker-resolve", "account_email": account, "owner_token": owner,
-                             "gmail_message_id": second_id})
+                             "gmail_message_id": second_id, "service_id": service_id})
         self.assertEqual(incomplete["error"]["code"], "METRON_EMAIL_COMMERCIAL_POLICY_REQUIRED")
+
+    def test_service_catalog_is_account_scoped_and_supports_multiple_services(self) -> None:
+        account = "operator@example.invalid"
+        owner = self.call("email-state", data={"action": "run-acquire", "account_email": account})["owner_token"]
+        first = self.set_service_policy(account, owner, service_name="Service Alpha")
+        second = self.set_service_policy(account, owner, service_name="Service Beta", active=False)
+        changed = self.set_service_policy(account, owner, service_id=first["service"]["service_id"],
+                                          service_name="Service Alpha", initial_asking_price_atomic=17000000)
+        self.assertEqual(changed["service"]["service_id"], first["service"]["service_id"])
+        self.assertNotEqual(changed["service"]["policy_fingerprint"], first["service"]["policy_fingerprint"])
+        listed = self.call("email-state", data={"action": "service-list", "account_email": account})["services"]
+        self.assertEqual({item["service"]["service_name"] for item in listed}, {"Service Alpha", "Service Beta"})
+        self.assertEqual({item["service"]["active"] for item in listed}, {True, False})
+        self.assertNotEqual(first["service"]["service_id"], second["service"]["service_id"])
+
+    def test_offers_are_persisted_and_bounded_by_the_selected_service(self) -> None:
+        account = "operator@example.invalid"
+        owner = self.call("email-state", data={"action": "run-acquire", "account_email": account})["owner_token"]
+        service = self.set_service_policy(account, owner)["service"]
+        conversation = self.call("email-state", data={"action": "conversation-upsert", "account_email": account,
+                                                        "owner_token": owner, "conversation_key": "offers",
+                                                        "gmail_thread_id": "offers-thread", "customer_email": "billing@example.invalid",
+                                                        "state": "NEGOTIATING", "service_id": service["service_id"]})
+        inbound_id = "offer-inbound"
+        self.call("email-state", data={"action": "message-claim", "account_email": account, "owner_token": owner,
+                                       "gmail_message_id": inbound_id, "gmail_thread_id": "offers-thread",
+                                       "customer_email": "billing@example.invalid"})
+        terms = {"quantity": 1, "service_scope": service["service_scope"],
+                 "deliverables": service["deliverables"], "delivery_days": service["delivery_days"]}
+        mismatched_customer_offer = self.call_error(
+            "email-state", data={"action": "offer-record", "account_email": account, "owner_token": owner,
+                                 "conversation_id": conversation["conversation_id"], "service_id": service["service_id"],
+                                 "direction": "INBOUND", "gmail_message_id": inbound_id,
+                                 "unit_price_atomic": 8000000,
+                                 "terms": {"requested_unit_price_atomic": 9000000}})
+        self.assertEqual(mismatched_customer_offer, "METRON_INVALID_INPUT")
+        customer_offer = self.call("email-state", data={"action": "offer-record", "account_email": account,
+                                                         "owner_token": owner, "conversation_id": conversation["conversation_id"],
+                                                         "service_id": service["service_id"], "direction": "INBOUND",
+                                                         "gmail_message_id": inbound_id, "unit_price_atomic": 9000000,
+                                                         "terms": {"requested_unit_price_atomic": 9000000}})
+        self.assertEqual(customer_offer["status"], "RECEIVED")
+
+        action_key = f"reply:{inbound_id}"
+        self.call("email-state", data={"action": "send-prepare", "account_email": account, "owner_token": owner,
+                                       "conversation_id": conversation["conversation_id"], "action_key": action_key,
+                                       "action_kind": "REPLY", "source_message_id": inbound_id,
+                                       "recipient_email": "billing@example.invalid", "content_sha256": "e" * 64})
+        invalid = self.call_error("email-state", data={"action": "offer-record", "account_email": account,
+                                                        "owner_token": owner, "conversation_id": conversation["conversation_id"],
+                                                        "service_id": service["service_id"], "direction": "OUTBOUND",
+                                                        "action_key": action_key, "unit_price_atomic": 9000000,
+                                                        "terms": terms})
+        self.assertEqual(invalid, "METRON_EMAIL_OFFER_OUT_OF_POLICY")
+        recorded = self.call("email-state", data={"action": "offer-record", "account_email": account,
+                                                   "owner_token": owner, "conversation_id": conversation["conversation_id"],
+                                                   "service_id": service["service_id"], "direction": "OUTBOUND",
+                                                   "action_key": action_key,
+                                                   "unit_price_atomic": service["initial_asking_price_atomic"],
+                                                   "terms": terms})
+        self.call("email-state", data={"action": "send-start", "account_email": account,
+                                       "owner_token": owner, "action_key": action_key})
+        self.call("email-state", data={"action": "send-confirm", "account_email": account,
+                                       "owner_token": owner, "action_key": action_key,
+                                       "gmail_message_id": "offer-outbound", "gmail_thread_id": "offers-thread",
+                                       "confirmation_source": "send_response"})
+        state = self.call("email-state", data={"action": "state-list", "account_email": account})
+        outbound = [item for item in state["commercial_offers"] if item["gmail_message_id"] == "offer-outbound"]
+        self.assertEqual(len(outbound), 1)
+        self.assertEqual(outbound[0]["status"], "CONFIRMED")
+        duplicate = self.call("email-state", data={"action": "offer-record", "account_email": account,
+                                                   "owner_token": owner, "conversation_id": conversation["conversation_id"],
+                                                   "service_id": service["service_id"], "direction": "OUTBOUND",
+                                                   "action_key": action_key,
+                                                   "unit_price_atomic": service["initial_asking_price_atomic"],
+                                                   "terms": terms})
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(recorded["offer_id"], duplicate["offer_id"])
+
+    def test_email_deal_terms_must_match_current_service_price_and_scope(self) -> None:
+        account = "operator@example.invalid"
+        owner = self.call("email-state", data={"action": "run-acquire", "account_email": account})["owner_token"]
+        service = self.set_service_policy(account, owner)["service"]
+        conversation = self.call("email-state", data={"action": "conversation-upsert", "account_email": account,
+                                                        "owner_token": owner, "conversation_key": "bound-deal",
+                                                        "gmail_thread_id": "bound-deal-thread", "customer_email": "billing@example.invalid",
+                                                        "state": "NEGOTIATING", "service_id": service["service_id"]})
+        terms = {"payer_wallet": WALLET, "service_description": service["service_scope"],
+                 "line_items": [{"description": service["service_name"], "quantity": 1,
+                                 "unit_price_atomic": service["initial_asking_price_atomic"]}],
+                 "commercial_service": service,
+                 "email_conversation_id": conversation["conversation_id"],
+                 "quantity": 1, "deliverables": service["deliverables"],
+                 "delivery_days": service["delivery_days"], "capacity_unit": service["capacity_unit"]}
+        too_cheap = self.call_error("deal-create", data={"goal_id": self.goal_id, "customer": "Bound Customer",
+                                                          "external_ref": "billing@example.invalid",
+                                                          "amount": "9", "terms": terms})
+        self.assertEqual(too_cheap, "METRON_EMAIL_OFFER_OUT_OF_POLICY")
+        accepted_offer = self.call("deal-create", data={"goal_id": self.goal_id, "customer": "Bound Customer",
+                                                          "external_ref": "billing@example.invalid",
+                                                          "amount": "15", "terms": terms})
+        self.call("deal-update", identifier=accepted_offer["id"], status="NEGOTIATING")
+        changed_policy = self.set_service_policy(account, owner, service_id=service["service_id"], active=False)["service"]
+        self.assertNotEqual(changed_policy["policy_fingerprint"], service["policy_fingerprint"])
+        invalidated = self.call_error("deal-accept", identifier=accepted_offer["id"])
+        self.assertEqual(invalidated, "METRON_EMAIL_SERVICE_UNAVAILABLE")
+        self.set_service_policy(account, owner, service_id=service["service_id"], active=True)
+        self.assertEqual(self.call("deal-accept", identifier=accepted_offer["id"])["status"], "PENDING_HUMAN")
+
+        second_conversation = self.call("email-state", data={"action": "conversation-upsert", "account_email": account,
+                                                                 "owner_token": owner, "conversation_key": "stripped-service",
+                                                                 "gmail_thread_id": "stripped-service-thread",
+                                                                 "customer_email": "stripped@example.invalid",
+                                                                 "state": "NEGOTIATING", "service_id": service["service_id"]})
+        second_terms = json.loads(json.dumps(terms))
+        second_terms["email_conversation_id"] = second_conversation["conversation_id"]
+        stripped = self.call("deal-create", data={"goal_id": self.goal_id, "customer": "Stripped Service",
+                                                   "external_ref": "stripped@example.invalid", "amount": "15",
+                                                   "terms": second_terms})
+        self.call("deal-update", identifier=stripped["id"], status="NEGOTIATING")
+        database = self.home / "metron.sqlite"
+        with sqlite3.connect(database) as db:
+            current_terms = json.loads(db.execute("SELECT terms_json FROM deals WHERE id=?", (stripped["id"],)).fetchone()[0])
+            current_terms.pop("commercial_service")
+            current_terms.pop("email_conversation_id")
+            db.execute("UPDATE deals SET terms_json=? WHERE id=?", (json.dumps(current_terms), stripped["id"]))
+        self.assertEqual(self.call_error("deal-accept", identifier=stripped["id"]),
+                         "METRON_EMAIL_SERVICE_POLICY_STALE")
+
+        self.set_service_policy(account, owner, service_id=service["service_id"], delivery_days=5)
+        stale_approval = self.call_error("deal-approve", identifier=accepted_offer["id"],
+                                         data={"payer_wallet": WALLET})
+        self.assertEqual(stale_approval, "METRON_EMAIL_SERVICE_POLICY_STALE")
+
+    def test_service_capacity_is_reserved_by_open_deals_and_released_on_rejection(self) -> None:
+        account = "capacity@example.invalid"
+        owner = self.call("email-state", data={"action": "run-acquire", "account_email": account})["owner_token"]
+        service = self.set_service_policy(account, owner, available_capacity_units=1)["service"]
+
+        def bound_conversation(key: str, thread: str) -> tuple[dict, dict]:
+            conversation = self.call("email-state", data={"action": "conversation-upsert", "account_email": account,
+                                                              "owner_token": owner, "conversation_key": key,
+                                                              "gmail_thread_id": thread, "customer_email": f"{key}@example.invalid",
+                                                              "state": "NEGOTIATING", "service_id": service["service_id"]})
+            terms = {"payer_wallet": WALLET, "service_description": service["service_scope"],
+                     "line_items": [{"description": service["service_name"], "quantity": 1,
+                                     "unit_price_atomic": service["initial_asking_price_atomic"]}],
+                     "commercial_service": service, "email_conversation_id": conversation["conversation_id"],
+                     "quantity": 1, "deliverables": service["deliverables"],
+                     "delivery_days": service["delivery_days"], "capacity_unit": service["capacity_unit"]}
+            return conversation, terms
+
+        def create_bound_deal(key: str, thread: str) -> str:
+            _, terms = bound_conversation(key, thread)
+            deal = self.call("deal-create", data={"goal_id": self.goal_id, "customer": key,
+                                                   "external_ref": f"{key}@example.invalid",
+                                                   "amount": "15", "terms": terms})
+            self.call("deal-update", identifier=deal["id"], status="NEGOTIATING")
+            return deal["id"]
+
+        second_conversation, second_terms = bound_conversation("second", "capacity-thread-2")
+        inbound_id = "capacity-message"
+        self.call("email-state", data={"action": "message-claim", "account_email": account, "owner_token": owner,
+                                       "gmail_message_id": inbound_id, "gmail_thread_id": "capacity-thread-2",
+                                       "customer_email": "second@example.invalid"})
+        action_key = f"reply:{inbound_id}"
+        self.call("email-state", data={"action": "send-prepare", "account_email": account, "owner_token": owner,
+                                       "conversation_id": second_conversation["conversation_id"],
+                                       "action_key": action_key, "action_kind": "REPLY",
+                                       "source_message_id": inbound_id, "recipient_email": "second@example.invalid",
+                                       "content_sha256": "f" * 64})
+        quote_terms = {"quantity": 1, "service_scope": service["service_scope"],
+                       "deliverables": service["deliverables"], "delivery_days": service["delivery_days"]}
+        self.call("email-state", data={"action": "offer-record", "account_email": account, "owner_token": owner,
+                                       "conversation_id": second_conversation["conversation_id"],
+                                       "service_id": service["service_id"], "direction": "OUTBOUND",
+                                       "action_key": action_key, "unit_price_atomic": service["initial_asking_price_atomic"],
+                                       "terms": quote_terms})
+
+        first_deal = create_bound_deal("first-capacity-customer", "capacity-thread-1")
+        listed = self.call("email-state", data={"action": "service-list", "account_email": account})["services"]
+        self.assertEqual(listed[0]["remaining_capacity_units"], 0)
+        send_blocked = self.call_error("email-state", data={"action": "send-start", "account_email": account,
+                                                              "owner_token": owner, "action_key": action_key})
+        self.assertEqual(send_blocked, "METRON_EMAIL_SERVICE_UNAVAILABLE")
+        second = self.call_error("deal-create", data={"goal_id": self.goal_id, "customer": "Second capacity customer",
+                                                       "external_ref": "second@example.invalid", "amount": "15",
+                                                       "terms": second_terms})
+        self.assertEqual(second, "METRON_EMAIL_SERVICE_UNAVAILABLE")
+
+        self.call("deal-accept", identifier=first_deal)
+        self.call("deal-reject", identifier=first_deal)
+        listed = self.call("email-state", data={"action": "service-list", "account_email": account})["services"]
+        self.assertEqual(listed[0]["remaining_capacity_units"], 1)
+        self.assertEqual(self.call("email-state", data={"action": "send-start", "account_email": account,
+                                                          "owner_token": owner, "action_key": action_key})["status"],
+                         "SUBMITTING")
+
+    def test_catalog_migration_preserves_existing_deals_and_legacy_policy_rows(self) -> None:
+        legacy_home = self.home / "legacy"
+        legacy_home.mkdir()
+        legacy_env = {**self.env, "METRON_HOME": str(legacy_home)}
+        database = legacy_home / "metron.sqlite"
+        with sqlite3.connect(database) as db:
+            db.executescript("""
+                CREATE TABLE goals (id TEXT PRIMARY KEY, revenue_target_atomic INTEGER, currency TEXT,
+                    status TEXT, created_at TEXT, completed_at TEXT);
+                CREATE TABLE counterparties (id TEXT PRIMARY KEY, kind TEXT, name TEXT, external_ref TEXT, created_at TEXT);
+                CREATE TABLE deals (id TEXT PRIMARY KEY, counterparty_id TEXT NOT NULL, goal_id TEXT NOT NULL,
+                    amount_atomic INTEGER NOT NULL, currency TEXT NOT NULL, terms_json TEXT NOT NULL,
+                    minimum_deal_approved INTEGER NOT NULL DEFAULT 0, custom_or_legal_terms INTEGER NOT NULL DEFAULT 0,
+                    custom_terms_approved INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, accepted_at TEXT,
+                    approved_at TEXT, created_at TEXT NOT NULL, originating_spend_intent_id TEXT);
+                CREATE TABLE email_commercial_policies (account_email TEXT PRIMARY KEY, service_scope TEXT,
+                    price_atomic INTEGER, available_capacity_units INTEGER, capacity_unit TEXT, delivery_days INTEGER,
+                    updated_at TEXT);
+                CREATE TABLE journal_entries (id TEXT PRIMARY KEY, source_type TEXT NOT NULL, source_id TEXT NOT NULL,
+                    description TEXT NOT NULL, status TEXT NOT NULL, posted_at TEXT NOT NULL,
+                    UNIQUE(source_type,source_id));
+                CREATE TABLE journal_lines (id INTEGER PRIMARY KEY, journal_entry_id TEXT NOT NULL,
+                    account_code TEXT NOT NULL, debit_atomic INTEGER NOT NULL, credit_atomic INTEGER NOT NULL,
+                    currency TEXT NOT NULL);
+                INSERT INTO goals VALUES ('GOAL-OLD',1000000,'USDC','ACTIVE','2026-01-01',NULL);
+                INSERT INTO counterparties VALUES ('CP-OLD','CUSTOMER','Historical Customer','old@example.invalid','2026-01-01');
+                INSERT INTO deals VALUES ('DEAL-OLD','CP-OLD','GOAL-OLD',1234567,'USDC','{\"service_description\":\"Historical\"}',
+                    0,0,0,'HUMAN_APPROVED',NULL,'2026-01-02','2026-01-01',NULL);
+                INSERT INTO email_commercial_policies VALUES ('old@example.invalid','Historical policy',123,2,'projects',30,'2026-01-01');
+                INSERT INTO journal_entries VALUES ('JE-OLD','SALES_INVOICE','INV-OLD','Historical invoice','POSTED','2026-01-02');
+                INSERT INTO journal_lines VALUES (1,'JE-OLD','1100',1234567,0,'USDC');
+                INSERT INTO journal_lines VALUES (2,'JE-OLD','4000',0,1234567,'USDC');
+            """)
+        result = subprocess.run([sys.executable, "-B", str(CLI), "init"], env=legacy_env,
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with sqlite3.connect(database) as db:
+            deal = db.execute("SELECT id,amount_atomic,terms_json,status FROM deals WHERE id='DEAL-OLD'").fetchone()
+            policy = db.execute("SELECT service_scope,price_atomic,available_capacity_units FROM email_commercial_policies "
+                                "WHERE account_email='old@example.invalid'").fetchone()
+            journal = db.execute("SELECT id,source_type,source_id,status FROM journal_entries WHERE id='JE-OLD'").fetchone()
+            lines = db.execute("SELECT account_code,debit_atomic,credit_atomic FROM journal_lines WHERE journal_entry_id='JE-OLD' "
+                               "ORDER BY id").fetchall()
+            columns = {row[1] for row in db.execute("PRAGMA table_info(deals)")}
+            integrity = db.execute("PRAGMA integrity_check").fetchone()[0]
+        self.assertEqual(deal, ("DEAL-OLD", 1234567, '{"service_description":"Historical"}', "HUMAN_APPROVED"))
+        self.assertEqual(policy, ("Historical policy", 123, 2))
+        self.assertEqual(journal, ("JE-OLD", "SALES_INVOICE", "INV-OLD", "POSTED"))
+        self.assertEqual(lines, [("1100", 1234567, 0), ("4000", 0, 1234567)])
+        self.assertTrue({"commercial_service_id", "commercial_capacity_units"}.issubset(columns))
+        self.assertEqual(integrity, "ok")
 
     def test_recovery_is_single_under_concurrency_and_terminal_no_action_stays_terminal(self) -> None:
         account = "operator@example.invalid"
@@ -467,9 +712,10 @@ class InvoiceWorkflowTest(unittest.TestCase):
                                        "gmail_message_id": message_id, "blocker_code": "COMMERCIAL_POLICY_UNAVAILABLE",
                                        "details": {"missing": ["service scope"],
                                                    "next_action": "Configure the commercial policy."}})
-        self.set_commercial_policy(account, owner)
+        service = self.set_service_policy(account, owner)["service"]
         self.call("email-state", data={"action": "blocker-resolve", "account_email": account,
-                                       "owner_token": owner, "gmail_message_id": message_id})
+                                       "owner_token": owner, "gmail_message_id": message_id,
+                                       "service_id": service["service_id"]})
         self.assertEqual(self.call("email-state", data={"action": "run-acquire", "account_email": account})["status"], "BUSY")
 
         paths = []
@@ -611,9 +857,10 @@ class InvoiceWorkflowTest(unittest.TestCase):
                                                         "owner_token": second_owner, "gmail_message_id": message_id,
                                                         "gmail_thread_id": "legacy-thread", "customer_email": "billing@example.invalid"})
         self.assertEqual(still_blocked["status"], "BLOCKED_COMMERCIAL_POLICY")
-        self.set_commercial_policy(account, second_owner)
+        service = self.set_service_policy(account, second_owner)["service"]
         self.call("email-state", data={"action": "blocker-resolve", "account_email": account,
-                                       "owner_token": second_owner, "gmail_message_id": message_id})
+                                       "owner_token": second_owner, "gmail_message_id": message_id,
+                                       "service_id": service["service_id"]})
         recovered = self.call("email-state", data={"action": "message-claim", "account_email": account,
                                                     "owner_token": second_owner, "gmail_message_id": message_id,
                                                     "gmail_thread_id": "legacy-thread", "customer_email": "billing@example.invalid"})
@@ -702,11 +949,31 @@ class InvoiceWorkflowTest(unittest.TestCase):
         path.write_text(json.dumps(data), encoding="utf-8")
         return path
 
-    def set_commercial_policy(self, account: str, owner: str) -> dict:
-        return self.call("email-state", data={"action": "commercial-policy-set", "account_email": account,
-                                               "owner_token": owner,
-                                               "service_scope": "One Arc Testnet analytics report", "price_atomic": 12500000,
-                                               "available_capacity_units": 2, "capacity_unit": "reports per week", "delivery_days": 5})
+    def service_policy_input(self, account: str, owner: str, **overrides: object) -> dict:
+        data = {"action": "service-set", "account_email": account, "owner_token": owner,
+                "service_name": "Service Alpha", "service_scope": "A defined service scope",
+                "deliverables": ["Deliverable one", "Deliverable two"],
+                "initial_asking_price_atomic": 15000000, "minimum_acceptable_price_atomic": 10000000,
+                "available_capacity_units": 3, "capacity_unit": "projects per month",
+                "delivery_days": 4, "active": True}
+        data.update(overrides)
+        return data
+
+    def set_service_policy(self, account: str, owner: str, **overrides: object) -> dict:
+        return self.call("email-state", data=self.service_policy_input(account, owner, **overrides))
+
+    def call_error(self, operation: str, *, identifier: str | None = None, data: dict | None = None) -> str:
+        command = [sys.executable, "-B", str(CLI), operation]
+        if identifier:
+            command.extend(["--id", identifier])
+        if data is not None:
+            input_path = self.home / f"request-error-{len(list(self.home.glob('request-error-*.json')))}.json"
+            input_path.write_text(json.dumps(data), encoding="utf-8")
+            command.extend(["--input", str(input_path)])
+        result = subprocess.run(command, env=self.env, capture_output=True, text=True)
+        payload = json.loads(result.stdout)
+        self.assertNotEqual(result.returncode, 0)
+        return payload["error"]["code"]
 
 
 if __name__ == "__main__":
