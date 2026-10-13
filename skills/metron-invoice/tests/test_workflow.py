@@ -633,6 +633,45 @@ class InvoiceWorkflowTest(unittest.TestCase):
                                          data={"payer_wallet": WALLET})
         self.assertEqual(stale_approval, "METRON_EMAIL_SERVICE_POLICY_STALE")
 
+    def test_service_bound_deal_approval_and_invoice_lifecycle(self) -> None:
+        account = "service-e2e@example.invalid"
+        owner = self.call("email-state", data={"action": "run-acquire", "account_email": account})["owner_token"]
+        service = self.set_service_policy(account, owner)["service"]
+        conversation = self.call("email-state", data={"action": "conversation-upsert", "account_email": account,
+                                                        "owner_token": owner, "conversation_key": "service-invoice",
+                                                        "gmail_thread_id": "service-invoice-thread",
+                                                        "customer_email": "buyer@example.invalid",
+                                                        "state": "NEGOTIATING", "service_id": service["service_id"]})
+        terms = {"payer_wallet": WALLET, "due_at": "2026-11-12",
+                 "service_description": service["service_scope"],
+                 "line_items": [{"description": service["service_name"], "quantity": 1,
+                                 "unit_price_atomic": service["initial_asking_price_atomic"]}],
+                 "commercial_service": service, "email_conversation_id": conversation["conversation_id"],
+                 "quantity": 1, "deliverables": service["deliverables"],
+                 "delivery_days": service["delivery_days"], "capacity_unit": service["capacity_unit"]}
+        deal = self.call("deal-create", data={"goal_id": self.goal_id, "customer": "Service Buyer",
+                                               "external_ref": "buyer@example.invalid", "amount": "15", "terms": terms})
+        with sqlite3.connect(self.home / "metron.sqlite") as db:
+            stored = db.execute("SELECT commercial_service_id,terms_json FROM deals WHERE id=?", (deal["id"],)).fetchone()
+        self.assertEqual(stored[0], service["service_id"])
+        self.assertEqual(json.loads(stored[1])["commercial_service"], service)
+
+        self.call("deal-update", identifier=deal["id"], status="NEGOTIATING")
+        self.assertEqual(self.call("deal-accept", identifier=deal["id"])["status"], "PENDING_HUMAN")
+        self.assertEqual(self.call("deal-approve", identifier=deal["id"], data={"payer_wallet": WALLET})["status"],
+                         "HUMAN_APPROVED")
+        first = self.call("invoice-create", identifier=deal["id"])
+        again = self.call("invoice-create", identifier=deal["id"])
+        self.assertEqual(first["id"], again["id"])
+        posted = self.call("invoice-post", identifier=first["id"])
+        posted_again = self.call("invoice-post", identifier=first["id"])
+        self.assertEqual(posted["journal_id"], posted_again["journal_id"])
+        with sqlite3.connect(self.home / "metron.sqlite") as db:
+            counts = db.execute("SELECT (SELECT COUNT(*) FROM sales_invoices WHERE deal_id=?), "
+                                "(SELECT COUNT(*) FROM journal_entries WHERE source_type='SALES_INVOICE' AND source_id=?)",
+                                (deal["id"], first["id"])).fetchone()
+        self.assertEqual(counts, (1, 1))
+
     def test_service_capacity_is_reserved_by_open_deals_and_released_on_rejection(self) -> None:
         account = "capacity@example.invalid"
         owner = self.call("email-state", data={"action": "run-acquire", "account_email": account})["owner_token"]
