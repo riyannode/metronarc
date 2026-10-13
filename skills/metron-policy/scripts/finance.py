@@ -67,13 +67,21 @@ def create_goal(db: sqlite3.Connection, data: dict) -> dict:
     timestamp = now()
     target = atomic(data.get("revenue_target"))
     policy = data.get("policy", {})
-    budget = atomic(policy.get("operating_budget"))
-    per_action = atomic(policy.get("max_spend_per_action", "0.10"))
-    daily = atomic(policy.get("max_daily_spend", "2"))
-    minimum_wallet_balance = atomic(policy.get("minimum_wallet_balance", "0"))
-    min_deal = atomic(policy.get("minimum_deal", "0"))
+    required = {
+        "operating_budget", "max_spend_per_action", "max_daily_spend",
+        "minimum_wallet_balance", "minimum_deal", "reinvestment_bps",
+    }
+    if not isinstance(policy, dict) or not required.issubset(policy):
+        raise DomainError("METRON_INVALID_POLICY")
+    budget = atomic(policy["operating_budget"])
+    per_action = atomic(policy["max_spend_per_action"])
+    daily = atomic(policy["max_daily_spend"])
+    minimum_wallet_balance = atomic(policy["minimum_wallet_balance"])
+    min_deal = atomic(policy["minimum_deal"])
     roi_bps = 0
-    reinvest_bps = int(policy.get("reinvestment_bps", 1000))
+    reinvest_bps = policy["reinvestment_bps"]
+    if isinstance(reinvest_bps, bool) or not isinstance(reinvest_bps, int):
+        raise DomainError("METRON_INVALID_POLICY")
     if target <= 0 or per_action <= 0 or daily < per_action or daily > budget or not 0 <= reinvest_bps <= 10000:
         raise DomainError("METRON_INVALID_POLICY")
     with store.transaction(db):

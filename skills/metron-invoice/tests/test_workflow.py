@@ -29,7 +29,8 @@ class InvoiceWorkflowTest(unittest.TestCase):
             "goal-create",
             data={
                 "revenue_target": "10",
-                "policy": {"operating_budget": "5", "max_spend_per_action": "1", "max_daily_spend": "5"},
+                "policy": {"operating_budget": "5", "max_spend_per_action": "1", "max_daily_spend": "5",
+                           "minimum_wallet_balance": "0", "minimum_deal": "0", "reinvestment_bps": 0},
             },
         )
         self.goal_id = goal["id"]
@@ -87,6 +88,34 @@ class InvoiceWorkflowTest(unittest.TestCase):
         accepted = self.call("deal-accept", identifier=deal["id"])
         self.assertEqual(accepted["status"], "PENDING_HUMAN")
 
+    def test_goal_creation_requires_explicit_monetary_and_reinvestment_policy(self) -> None:
+        policy = {
+            "operating_budget": "5",
+            "max_spend_per_action": "1",
+            "max_daily_spend": "5",
+            "minimum_wallet_balance": "0",
+            "minimum_deal": "0",
+            "reinvestment_bps": 0,
+        }
+        required = set(policy)
+        for missing in required:
+            with self.subTest(missing=missing):
+                incomplete = dict(policy)
+                incomplete.pop(missing)
+                self.assertEqual(
+                    self.call_error("goal-create", data={"revenue_target": "10", "policy": incomplete}),
+                    "METRON_INVALID_POLICY",
+                )
+
+        configured = self.call("goal-create", data={"revenue_target": "10", "policy": policy})
+        with sqlite3.connect(self.home / "metron.sqlite") as db:
+            stored = db.execute(
+                "SELECT operating_budget_atomic,max_spend_per_action_atomic,max_daily_spend_atomic,"
+                "minimum_wallet_balance_atomic,minimum_deal_atomic,reinvestment_bps "
+                "FROM policies WHERE goal_id=?", (configured["id"],),
+            ).fetchone()
+        self.assertEqual(stored, (5_000_000, 1_000_000, 5_000_000, 0, 0, 0))
+
     def test_explicit_custom_terms_and_below_minimum_still_escalate(self) -> None:
         custom = self.call(
             "deal-create",
@@ -115,7 +144,9 @@ class InvoiceWorkflowTest(unittest.TestCase):
                     "operating_budget": "5",
                     "max_spend_per_action": "1",
                     "max_daily_spend": "5",
+                    "minimum_wallet_balance": "0",
                     "minimum_deal": "15",
+                    "reinvestment_bps": 0,
                 },
             },
         )
@@ -452,7 +483,11 @@ class InvoiceWorkflowTest(unittest.TestCase):
         account = "operator@example.invalid"
         owner = self.call("email-state", data={"action": "run-acquire", "account_email": account})["owner_token"]
         first = self.set_service_policy(account, owner, service_name="Service Alpha")
-        second = self.set_service_policy(account, owner, service_name="Service Beta", active=False)
+        second = self.set_service_policy(
+            account, owner, service_name="Service Beta", service_scope="A separate policy",
+            initial_asking_price_atomic=40000000, minimum_acceptable_price_atomic=32000000,
+            delivery_days=8, active=False,
+        )
         changed = self.set_service_policy(account, owner, service_id=first["service"]["service_id"],
                                           service_name="Service Alpha", initial_asking_price_atomic=17000000)
         self.assertEqual(changed["service"]["service_id"], first["service"]["service_id"])
@@ -461,6 +496,12 @@ class InvoiceWorkflowTest(unittest.TestCase):
         self.assertEqual({item["service"]["service_name"] for item in listed}, {"Service Alpha", "Service Beta"})
         self.assertEqual({item["service"]["active"] for item in listed}, {True, False})
         self.assertNotEqual(first["service"]["service_id"], second["service"]["service_id"])
+        policies = {item["service"]["service_name"]: item["service"] for item in listed}
+        self.assertEqual(policies["Service Alpha"]["minimum_acceptable_price_atomic"], 10000000)
+        self.assertEqual(policies["Service Alpha"]["initial_asking_price_atomic"], 17000000)
+        self.assertEqual(policies["Service Beta"]["minimum_acceptable_price_atomic"], 32000000)
+        self.assertEqual(policies["Service Beta"]["initial_asking_price_atomic"], 40000000)
+        self.assertEqual(policies["Service Beta"]["delivery_days"], 8)
 
     def test_offers_are_persisted_and_bounded_by_the_selected_service(self) -> None:
         account = "operator@example.invalid"
@@ -501,11 +542,11 @@ class InvoiceWorkflowTest(unittest.TestCase):
                                                         "action_key": action_key, "unit_price_atomic": 9000000,
                                                         "terms": terms})
         self.assertEqual(invalid, "METRON_EMAIL_OFFER_OUT_OF_POLICY")
+        counteroffer_price = service["minimum_acceptable_price_atomic"] + 1000000
         recorded = self.call("email-state", data={"action": "offer-record", "account_email": account,
                                                    "owner_token": owner, "conversation_id": conversation["conversation_id"],
                                                    "service_id": service["service_id"], "direction": "OUTBOUND",
-                                                   "action_key": action_key,
-                                                   "unit_price_atomic": service["initial_asking_price_atomic"],
+                                                   "action_key": action_key, "unit_price_atomic": counteroffer_price,
                                                    "terms": terms})
         self.call("email-state", data={"action": "send-start", "account_email": account,
                                        "owner_token": owner, "action_key": action_key})
@@ -520,8 +561,7 @@ class InvoiceWorkflowTest(unittest.TestCase):
         duplicate = self.call("email-state", data={"action": "offer-record", "account_email": account,
                                                    "owner_token": owner, "conversation_id": conversation["conversation_id"],
                                                    "service_id": service["service_id"], "direction": "OUTBOUND",
-                                                   "action_key": action_key,
-                                                   "unit_price_atomic": service["initial_asking_price_atomic"],
+                                                   "action_key": action_key, "unit_price_atomic": counteroffer_price,
                                                    "terms": terms})
         self.assertTrue(duplicate["duplicate"])
         self.assertEqual(recorded["offer_id"], duplicate["offer_id"])
@@ -549,6 +589,18 @@ class InvoiceWorkflowTest(unittest.TestCase):
                                                           "external_ref": "billing@example.invalid",
                                                           "amount": "15", "terms": terms})
         self.call("deal-update", identifier=accepted_offer["id"], status="NEGOTIATING")
+        below_service_minimum = json.loads(json.dumps(terms))
+        below_service_minimum["line_items"][0]["unit_price_atomic"] = 9000000
+        with sqlite3.connect(self.home / "metron.sqlite") as db:
+            db.execute("UPDATE deals SET amount_atomic=?,terms_json=? WHERE id=?",
+                       (9000000, json.dumps(below_service_minimum), accepted_offer["id"]))
+        self.assertEqual(
+            self.call_error("deal-accept", identifier=accepted_offer["id"]),
+            "METRON_EMAIL_OFFER_OUT_OF_POLICY",
+        )
+        with sqlite3.connect(self.home / "metron.sqlite") as db:
+            db.execute("UPDATE deals SET amount_atomic=?,terms_json=? WHERE id=?",
+                       (15000000, json.dumps(terms), accepted_offer["id"]))
         changed_policy = self.set_service_policy(account, owner, service_id=service["service_id"], active=False)["service"]
         self.assertNotEqual(changed_policy["policy_fingerprint"], service["policy_fingerprint"])
         invalidated = self.call_error("deal-accept", identifier=accepted_offer["id"])
