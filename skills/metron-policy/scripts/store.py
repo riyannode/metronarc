@@ -134,7 +134,9 @@ CREATE TABLE IF NOT EXISTS email_message_events (
   event_type TEXT NOT NULL CHECK (event_type IN ('BLOCKER','NO_ACTION','REPLY_CONFIRMED')),
   reason_code TEXT NOT NULL, details_json TEXT NOT NULL DEFAULT '{}',
   status TEXT CHECK (status IN ('OPEN','RESOLVED')),
-  policy_fingerprint TEXT, reported_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  policy_fingerprint TEXT, reported_at TEXT, delivery_attempted_at TEXT,
+  delivery_acknowledged_at TEXT, delivery_reference TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   CHECK ((event_type='BLOCKER' AND status IS NOT NULL) OR (event_type!='BLOCKER' AND status IS NULL)),
   UNIQUE(account_email,gmail_message_id,event_type),
   FOREIGN KEY(account_email,gmail_message_id) REFERENCES email_messages(account_email,gmail_message_id)
@@ -152,6 +154,12 @@ CREATE TABLE IF NOT EXISTS email_send_attempts (
 );
 CREATE TABLE IF NOT EXISTS email_run_locks (
   account_email TEXT PRIMARY KEY, owner_token TEXT NOT NULL, expires_at TEXT NOT NULL, acquired_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS email_commercial_policies (
+  account_email TEXT PRIMARY KEY, service_scope TEXT NOT NULL CHECK (length(trim(service_scope)) > 0),
+  price_atomic INTEGER NOT NULL CHECK (price_atomic >= 0), available_capacity_units INTEGER NOT NULL CHECK (available_capacity_units >= 0),
+  capacity_unit TEXT NOT NULL CHECK (length(trim(capacity_unit)) > 0),
+  delivery_days INTEGER NOT NULL CHECK (delivery_days >= 0), updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_spend_intents_goal_status ON spend_intents(goal_id,status);
 CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at DESC);
@@ -217,6 +225,7 @@ def connect() -> sqlite3.Connection:
 def initialize() -> dict[str, str]:
     with connect() as db:
         db.executescript(SCHEMA)
+        _migrate_email_message_events(db)
         _migrate_email_send_attempts(db)
         db.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_email_one_invoice_per_invoice "
@@ -279,6 +288,21 @@ def initialize() -> dict[str, str]:
             config.pop("vault_address")
             write_config(config)
     return {"database": str(DATABASE), "config": str(CONFIG)}
+
+
+def _migrate_email_message_events(db: sqlite3.Connection) -> None:
+    columns = {row[1] for row in db.execute("PRAGMA table_info(email_message_events)")}
+    with transaction(db):
+        if "delivery_acknowledged_at" not in columns:
+            db.execute("ALTER TABLE email_message_events ADD COLUMN delivery_acknowledged_at TEXT")
+        if "delivery_attempted_at" not in columns:
+            db.execute("ALTER TABLE email_message_events ADD COLUMN delivery_attempted_at TEXT")
+        if "delivery_reference" not in columns:
+            db.execute("ALTER TABLE email_message_events ADD COLUMN delivery_reference TEXT")
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_email_blocker_pending_delivery "
+            "ON email_message_events(account_email,event_type,status,delivery_acknowledged_at)"
+        )
 
 
 def _migrate_email_send_attempts(db: sqlite3.Connection) -> None:

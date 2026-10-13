@@ -24,6 +24,12 @@ The CLI returns stable codes in `{"ok":false,"error":{"code":...,"message":...}}
 | `METRON_EMAIL_SUPPRESSION_CHANGE_REQUIRES_USER` | Clearing a recipient suppression requires a direct user request; email content cannot authorize it. |
 | `METRON_EMAIL_MESSAGE_NOT_FOUND` | The requested Gmail message is not recorded in the associated conversation. Read and claim the exact message before replying. |
 | `METRON_EMAIL_MESSAGE_LOCKED` | This message is not claimed by the current run. Do not process or reply until the active claim is resolved. |
+| `METRON_EMAIL_MESSAGE_ALREADY_FINALIZED` | The inbound message already has a terminal `NO_ACTION` or `REPLY_CONFIRMED` event; do not reopen it through a blocker. |
+| `METRON_EMAIL_COMMERCIAL_POLICY_REQUIRED` | Persisted service scope, positive USDC price, available capacity, delivery timeline, or Arc Testnet configuration is missing or invalid; keep the blocker open. |
+| `METRON_EMAIL_BLOCKER_NOT_FOUND` | No blocker exists for the supplied account and blocker ID. |
+| `METRON_EMAIL_BLOCKER_NOT_OPEN` | Only an open blocker can receive a new delivery acknowledgement. |
+| `METRON_EMAIL_BLOCKER_NOT_REPORTED` | Surface the blocker with `blocker-report` before acknowledging delivery. |
+| `METRON_EMAIL_BLOCKER_ACK_CONFLICT` | The blocker was already acknowledged with a different visible delivery reference; inspect state instead of overwriting it. |
 | `METRON_EMAIL_ACTION_NOT_FOUND` | No durable send attempt exists for the supplied action key. Prepare the action before starting or confirming it. |
 | `METRON_EMAIL_ACTION_CONFLICT` | The action key was reused with different content or identity. Do not send; inspect the existing attempt. |
 | `METRON_EMAIL_SEND_UNRESOLVED` | A send is prepared, submitting, or ambiguous. Read the existing thread and do not send again until authoritative connector evidence resolves it. |

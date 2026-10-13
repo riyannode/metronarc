@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -7,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 
@@ -347,12 +349,210 @@ class InvoiceWorkflowTest(unittest.TestCase):
         )
         self.assertEqual(completed["status"], "ALREADY_PROCESSED")
 
+        legacy_reported_at = "2026-10-13T00:00:00Z"
+        with sqlite3.connect(self.home / "metron.sqlite") as db:
+            db.execute("UPDATE email_message_events SET reported_at=? WHERE account_email=? AND gmail_message_id=?",
+                       (legacy_reported_at, account, message_id))
+
         notification = self.call("email-state", data={"action": "blocker-report", "account_email": account,
                                                         "owner_token": owner})
         self.assertEqual(len(notification["blockers"]), 1)
         self.assertEqual(notification["blockers"][0]["gmail_message_id"], message_id)
+        with sqlite3.connect(self.home / "metron.sqlite") as db:
+            reported, attempted, acknowledged = db.execute(
+                "SELECT reported_at,delivery_attempted_at,delivery_acknowledged_at FROM email_message_events "
+                "WHERE account_email=? AND gmail_message_id=?", (account, message_id)).fetchone()
+        self.assertEqual(reported, legacy_reported_at)
+        self.assertIsNotNone(attempted)
+        self.assertIsNone(acknowledged)
+        retried_report = self.call("email-state", data={"action": "blocker-report", "account_email": account,
+                                                        "owner_token": owner})
+        self.assertEqual([item["id"] for item in retried_report["blockers"]],
+                         [item["id"] for item in notification["blockers"]])
+        acknowledgement = self.call("email-state", data={"action": "blocker-ack", "account_email": account,
+                                                            "owner_token": owner,
+                                                            "blocker_id": notification["blockers"][0]["id"],
+                                                            "delivery_reference": "visible-run-001"})
+        self.assertEqual(acknowledgement["status"], "ACKNOWLEDGED")
+        self.call("email-state", data={"action": "run-release", "account_email": account, "owner_token": owner})
+        restarted_owner = self.call("email-state", data={"action": "run-acquire", "account_email": account})["owner_token"]
         self.assertEqual(self.call("email-state", data={"action": "blocker-report", "account_email": account,
-                                                         "owner_token": owner})["blockers"], [])
+                                                         "owner_token": restarted_owner})["blockers"], [])
+        repeated_ack = self.call("email-state", data={"action": "blocker-ack", "account_email": account,
+                                                        "owner_token": restarted_owner,
+                                                        "blocker_id": notification["blockers"][0]["id"],
+                                                        "delivery_reference": "visible-run-001"})
+        self.assertEqual(repeated_ack["status"], "ALREADY_ACKNOWLEDGED")
+
+    def test_blocker_resolution_requires_verified_persisted_commercial_policy(self) -> None:
+        account = "operator@example.invalid"
+        owner = self.call("email-state", data={"action": "run-acquire", "account_email": account})["owner_token"]
+        self.call("email-state", data={"action": "conversation-upsert", "account_email": account,
+                                       "owner_token": owner, "conversation_key": "policy",
+                                       "gmail_thread_id": "policy-thread", "customer_email": "billing@example.invalid",
+                                       "state": "NEGOTIATING"})
+        message_id = "policy-message"
+        self.call("email-state", data={"action": "message-claim", "account_email": account, "owner_token": owner,
+                                       "gmail_message_id": message_id, "gmail_thread_id": "policy-thread",
+                                       "customer_email": "billing@example.invalid"})
+        self.call("email-state", data={"action": "blocker-record", "account_email": account, "owner_token": owner,
+                                       "gmail_message_id": message_id, "blocker_code": "COMMERCIAL_POLICY_UNAVAILABLE",
+                                       "details": {"missing": ["service scope", "price", "capacity", "timeline"],
+                                                   "next_action": "Configure the commercial policy."}})
+
+        def invoke(data: dict) -> dict:
+            request_path = self.home / f"request-{len(list(self.home.glob('request-*.json')))}.json"
+            request_path.write_text(json.dumps(data), encoding="utf-8")
+            result = subprocess.run([sys.executable, "-B", str(CLI), "email-state", "--input", str(request_path)],
+                                    env=self.env, capture_output=True, text=True)
+            return json.loads(result.stdout)
+
+        unresolved = invoke({"action": "blocker-resolve", "account_email": account, "owner_token": owner,
+                             "gmail_message_id": message_id})
+        self.assertEqual(unresolved["error"]["code"], "METRON_EMAIL_COMMERCIAL_POLICY_REQUIRED")
+        forged_hash = invoke({"action": "blocker-resolve", "account_email": account, "owner_token": owner,
+                             "gmail_message_id": message_id, "policy_fingerprint": "a" * 64})
+        self.assertEqual(forged_hash["error"]["code"], "METRON_INVALID_INPUT")
+
+        policy = {"action": "commercial-policy-set", "account_email": account, "owner_token": owner,
+                  "service_scope": "One Arc Testnet analytics report", "price_atomic": 12500000,
+                  "available_capacity_units": 2, "capacity_unit": "reports per week", "delivery_days": 5}
+        configured = self.call("email-state", data=policy)
+        canonical = {"account_email": account, "service_scope": policy["service_scope"],
+                     "price_atomic": 12500000, "available_capacity_units": 2, "capacity_unit": "reports per week",
+                     "delivery_days": 5, "currency": "USDC", "chain": "ARC-TESTNET"}
+        expected = hashlib.sha256(json.dumps(canonical, sort_keys=True, separators=(",", ":"),
+                                            ensure_ascii=False).encode()).hexdigest()
+        self.assertEqual(configured["policy_fingerprint"], expected)
+        readback = self.call("email-state", data={"action": "commercial-policy-get", "account_email": account})
+        self.assertEqual(readback["status"], "CONFIGURED")
+        self.assertEqual(readback["policy"], canonical)
+        self.assertEqual(readback["policy_fingerprint"], expected)
+        for field in ("price_atomic", "available_capacity_units", "delivery_days"):
+            incomplete_policy = dict(policy)
+            incomplete_policy[field] = 0
+            invalid = invoke(incomplete_policy)
+            self.assertEqual(invalid["error"]["code"], "METRON_EMAIL_COMMERCIAL_POLICY_REQUIRED")
+        resolved = self.call("email-state", data={"action": "blocker-resolve", "account_email": account,
+                                                   "owner_token": owner, "gmail_message_id": message_id})
+        self.assertEqual(resolved["policy_fingerprint"], expected)
+
+        with sqlite3.connect(self.home / "metron.sqlite") as db:
+            db.execute("PRAGMA ignore_check_constraints=ON")
+            db.execute("UPDATE email_commercial_policies SET service_scope='' WHERE account_email=?", (account,))
+        second_id = "incomplete-policy-message"
+        self.call("email-state", data={"action": "message-claim", "account_email": account, "owner_token": owner,
+                                       "gmail_message_id": second_id, "gmail_thread_id": "policy-thread",
+                                       "customer_email": "billing@example.invalid"})
+        self.call("email-state", data={"action": "blocker-record", "account_email": account, "owner_token": owner,
+                                       "gmail_message_id": second_id, "blocker_code": "COMMERCIAL_POLICY_UNAVAILABLE",
+                                       "details": {"missing": ["service scope"],
+                                                   "next_action": "Configure the commercial policy."}})
+        incomplete = invoke({"action": "blocker-resolve", "account_email": account, "owner_token": owner,
+                             "gmail_message_id": second_id})
+        self.assertEqual(incomplete["error"]["code"], "METRON_EMAIL_COMMERCIAL_POLICY_REQUIRED")
+
+    def test_recovery_is_single_under_concurrency_and_terminal_no_action_stays_terminal(self) -> None:
+        account = "operator@example.invalid"
+        owner = self.call("email-state", data={"action": "run-acquire", "account_email": account})["owner_token"]
+        self.call("email-state", data={"action": "conversation-upsert", "account_email": account,
+                                       "owner_token": owner, "conversation_key": "concurrent",
+                                       "gmail_thread_id": "concurrent-thread", "customer_email": "billing@example.invalid",
+                                       "state": "NEGOTIATING"})
+        message_id = "concurrent-message"
+        self.call("email-state", data={"action": "message-claim", "account_email": account, "owner_token": owner,
+                                       "gmail_message_id": message_id, "gmail_thread_id": "concurrent-thread",
+                                       "customer_email": "billing@example.invalid"})
+        self.call("email-state", data={"action": "blocker-record", "account_email": account, "owner_token": owner,
+                                       "gmail_message_id": message_id, "blocker_code": "COMMERCIAL_POLICY_UNAVAILABLE",
+                                       "details": {"missing": ["service scope"],
+                                                   "next_action": "Configure the commercial policy."}})
+        self.set_commercial_policy(account, owner)
+        self.call("email-state", data={"action": "blocker-resolve", "account_email": account,
+                                       "owner_token": owner, "gmail_message_id": message_id})
+        self.assertEqual(self.call("email-state", data={"action": "run-acquire", "account_email": account})["status"], "BUSY")
+
+        paths = []
+        for index in range(4):
+            path = self.home / f"parallel-claim-{index}.json"
+            path.write_text(json.dumps({"action": "message-claim", "account_email": account, "owner_token": owner,
+                                        "gmail_message_id": message_id, "gmail_thread_id": "concurrent-thread",
+                                        "customer_email": "billing@example.invalid"}), encoding="utf-8")
+            paths.append(path)
+
+        def claim(path: Path) -> str:
+            result = subprocess.run([sys.executable, "-B", str(CLI), "email-state", "--input", str(path)],
+                                    env=self.env, capture_output=True, text=True)
+            payload = json.loads(result.stdout)
+            if result.returncode:
+                raise AssertionError(payload.get("error", {}).get("code", result.stderr))
+            return payload["data"]["status"]
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            statuses = list(pool.map(claim, paths))
+        self.assertEqual(statuses.count("RECOVERED"), 1)
+        self.assertEqual(statuses.count("ALREADY_CLAIMED"), 3)
+        self.call("email-state", data={"action": "message-complete", "account_email": account,
+                                       "owner_token": owner, "gmail_message_id": message_id,
+                                       "no_action_code": "OUT_OF_SCOPE"})
+        self.call("email-state", data={"action": "run-release", "account_email": account, "owner_token": owner})
+        restarted_owner = self.call("email-state", data={"action": "run-acquire", "account_email": account})["owner_token"]
+        terminal = self.call("email-state", data={"action": "message-claim", "account_email": account,
+                                                   "owner_token": restarted_owner, "gmail_message_id": message_id,
+                                                   "gmail_thread_id": "concurrent-thread",
+                                                   "customer_email": "billing@example.invalid"})
+        self.assertEqual(terminal["status"], "DUPLICATE")
+        reopened = subprocess.run([sys.executable, "-B", str(CLI), "email-state", "--input",
+                                   str(self.write_request({"action": "blocker-record", "account_email": account,
+                                                           "owner_token": restarted_owner, "gmail_message_id": message_id,
+                                                           "blocker_code": "COMMERCIAL_POLICY_UNAVAILABLE",
+                                                           "details": {"missing": ["service scope"],
+                                                                       "next_action": "Configure the commercial policy."}}))],
+                                  env=self.env, capture_output=True, text=True)
+        self.assertEqual(json.loads(reopened.stdout)["error"]["code"], "METRON_EMAIL_MESSAGE_ALREADY_FINALIZED")
+        events = self.call("email-state", data={"action": "state-list", "account_email": account})["message_events"]
+        self.assertEqual(len([event for event in events if event["gmail_message_id"] == message_id]), 2)
+
+    def test_email_event_ack_migration_keeps_legacy_reported_event_pending(self) -> None:
+        account = "operator@example.invalid"
+        owner = self.call("email-state", data={"action": "run-acquire", "account_email": account})["owner_token"]
+        self.call("email-state", data={"action": "conversation-upsert", "account_email": account,
+                                       "owner_token": owner, "conversation_key": "old-event",
+                                       "gmail_thread_id": "old-event-thread", "customer_email": "billing@example.invalid",
+                                       "state": "NEGOTIATING"})
+        self.call("email-state", data={"action": "message-claim", "account_email": account, "owner_token": owner,
+                                       "gmail_message_id": "old-event-message", "gmail_thread_id": "old-event-thread",
+                                       "customer_email": "billing@example.invalid"})
+        blocker = self.call("email-state", data={"action": "blocker-record", "account_email": account,
+                                                  "owner_token": owner, "gmail_message_id": "old-event-message",
+                                                  "blocker_code": "COMMERCIAL_POLICY_UNAVAILABLE",
+                                                  "details": {"missing": ["scope"],
+                                                              "next_action": "Configure the commercial policy."}})
+        database = self.home / "metron.sqlite"
+        with sqlite3.connect(database) as db:
+            db.execute("UPDATE email_message_events SET reported_at='2026-10-13T00:00:00Z' WHERE id=?",
+                       (blocker["blocker_id"],))
+            db.execute("DROP INDEX IF EXISTS idx_email_blocker_pending_delivery")
+            db.execute("ALTER TABLE email_message_events DROP COLUMN delivery_acknowledged_at")
+            db.execute("ALTER TABLE email_message_events DROP COLUMN delivery_attempted_at")
+            db.execute("ALTER TABLE email_message_events DROP COLUMN delivery_reference")
+        self.call("init")
+        with sqlite3.connect(database) as db:
+            columns = {row[1] for row in db.execute("PRAGMA table_info(email_message_events)")}
+            reported_at, attempted_at, acknowledged_at = db.execute(
+                "SELECT reported_at,delivery_attempted_at,delivery_acknowledged_at FROM email_message_events WHERE id=?",
+                (blocker["blocker_id"],)).fetchone()
+            integrity = db.execute("PRAGMA integrity_check").fetchone()[0]
+        self.assertIn("delivery_acknowledged_at", columns)
+        self.assertIn("delivery_attempted_at", columns)
+        self.assertIn("delivery_reference", columns)
+        self.assertEqual(reported_at, "2026-10-13T00:00:00Z")
+        self.assertIsNone(attempted_at)
+        self.assertIsNone(acknowledged_at)
+        self.assertEqual(integrity, "ok")
+        report = self.call("email-state", data={"action": "blocker-report", "account_email": account,
+                                                 "owner_token": owner})
+        self.assertEqual([item["id"] for item in report["blockers"]], [blocker["blocker_id"]])
 
     def test_non_actionable_message_requires_explicit_durable_reason(self) -> None:
         account = "operator@example.invalid"
@@ -411,9 +611,9 @@ class InvoiceWorkflowTest(unittest.TestCase):
                                                         "owner_token": second_owner, "gmail_message_id": message_id,
                                                         "gmail_thread_id": "legacy-thread", "customer_email": "billing@example.invalid"})
         self.assertEqual(still_blocked["status"], "BLOCKED_COMMERCIAL_POLICY")
+        self.set_commercial_policy(account, second_owner)
         self.call("email-state", data={"action": "blocker-resolve", "account_email": account,
-                                       "owner_token": second_owner, "gmail_message_id": message_id,
-                                       "policy_fingerprint": "c" * 64})
+                                       "owner_token": second_owner, "gmail_message_id": message_id})
         recovered = self.call("email-state", data={"action": "message-claim", "account_email": account,
                                                     "owner_token": second_owner, "gmail_message_id": message_id,
                                                     "gmail_thread_id": "legacy-thread", "customer_email": "billing@example.invalid"})
@@ -501,6 +701,12 @@ class InvoiceWorkflowTest(unittest.TestCase):
         path = self.home / "request.json"
         path.write_text(json.dumps(data), encoding="utf-8")
         return path
+
+    def set_commercial_policy(self, account: str, owner: str) -> dict:
+        return self.call("email-state", data={"action": "commercial-policy-set", "account_email": account,
+                                               "owner_token": owner,
+                                               "service_scope": "One Arc Testnet analytics report", "price_atomic": 12500000,
+                                               "available_capacity_units": 2, "capacity_unit": "reports per week", "delivery_days": 5})
 
 
 if __name__ == "__main__":
