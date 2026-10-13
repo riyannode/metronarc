@@ -15,6 +15,21 @@ The CLI returns stable codes in `{"ok":false,"error":{"code":...,"message":...}}
 | `METRON_POLICY_MISSING` | Goal or required policy is missing. |
 | `METRON_GOAL_NOT_FOUND` | The requested goal ID does not exist. |
 | `METRON_INVALID_OPERATION` | Choose an operation listed by `run.py --help`. |
+| `METRON_STATE_SCHEMA_INVALID` | Email state requires an intact existing METRON database with its core tables; inspect the existing local ledger before continuing. |
+| `METRON_EMAIL_RUN_LOCK_LOST` | The account run lock expired or belongs to another run. Stop email mutations and reacquire it before resuming. |
+| `METRON_EMAIL_CONVERSATION_NOT_FOUND` | The requested conversation is not in this account's local email state. Load or create the correct thread-bound conversation first. |
+| `METRON_EMAIL_IDENTITY_MISMATCH` | Account, customer, message, or thread identity conflicts with stored state. Stop and inspect the exact Gmail thread; do not merge conversations. |
+| `METRON_EMAIL_OPTED_OUT` | The customer asked to stop. Keep the suppression and do not send further outreach or follow-ups. |
+| `METRON_EMAIL_SEND_LIMIT_REACHED` | The account-wide rolling 24-hour outbound limit is reached. Keep the attempt prepared and do not call the email connector. |
+| `METRON_EMAIL_SUPPRESSION_CHANGE_REQUIRES_USER` | Clearing a recipient suppression requires a direct user request; email content cannot authorize it. |
+| `METRON_EMAIL_MESSAGE_NOT_FOUND` | The requested Gmail message is not recorded in the associated conversation. Read and claim the exact message before replying. |
+| `METRON_EMAIL_MESSAGE_LOCKED` | This message is not claimed by the current run. Do not process or reply until the active claim is resolved. |
+| `METRON_EMAIL_ACTION_NOT_FOUND` | No durable send attempt exists for the supplied action key. Prepare the action before starting or confirming it. |
+| `METRON_EMAIL_ACTION_CONFLICT` | The action key was reused with different content or identity. Do not send; inspect the existing attempt. |
+| `METRON_EMAIL_SEND_UNRESOLVED` | A send is prepared, submitting, or ambiguous. Read the existing thread and do not send again until authoritative connector evidence resolves it. |
+| `METRON_EMAIL_SEND_AMBIGUOUS` | The connector may have accepted the message but did not return a definitive result. Preserve `UNKNOWN` and inspect the existing Gmail thread; never resend. |
+| `METRON_EMAIL_SEND_FAILED` | The connector definitively confirmed it did not send. Preserve the failed action and investigate before preparing a new communication. |
+| `METRON_EMAIL_PROCESSING_FAILED` | Message processing stopped. Inspect the saved state and connector response before reclaiming it. |
 | `METRON_CIRCLE_TERMS_CONSENT_REQUIRED` | Circle Terms were not accepted by the user. Show the current Terms and Privacy Policy links and continue only after explicit consent. |
 | `METRON_CIRCLE_TERMS_ACCEPTANCE_FAILED` | Circle did not report the current Terms as accepted after the user-approved acceptance command. Do not retry automatically. |
 | `METRON_SPEND_DENIED` | A hard spend policy denied this intent, or the latest no-payment estimate exceeds the approved maximum or no longer matches the approved seller or chain. `DENY` cannot be human-overridden; no payment was dispatched. |
@@ -58,6 +73,11 @@ The CLI returns stable codes in `{"ok":false,"error":{"code":...,"message":...}}
 | `METRON_RECONCILIATION_MISMATCH` | State, direction, currency, amount, destination, invoice, or evidence did not match. |
 | `METRON_INVOICE_NOT_OPEN` | Invoice cannot be posted or reconciled in its current state. |
 | `METRON_INVOICE_NOT_FOUND` | The requested invoice ID does not exist. |
+| `METRON_INVOICE_DUE_DATE_REQUIRED` | An approved deal must include an agreed due date before METRON can create or post its invoice. |
+| `METRON_INVOICE_POSTING_INVALID` | An open or paid invoice has no persisted sales-invoice journal; stop and inspect the ledger before continuing. |
+| `METRON_INVOICE_NOT_POSTED` | Invoice email delivery requires the existing posted, unpaid invoice. |
+| `METRON_INVOICE_DOCUMENT_INVALID` | Required issuer, customer, approved service, due date, Arc Testnet recipient, or exact amount data is missing or invalid. Do not invent document values. |
+| `METRON_INVOICE_DOCUMENT_CONFLICT` | An existing invoice PDF or its source commitment differs from the persisted invoice. Do not overwrite or resend it. |
 | `METRON_HUMAN_APPROVAL_REQUIRED` | The deal has not passed its required human approval gate. |
 | `METRON_JOURNAL_UNBALANCED` | Accounting lines did not balance; transaction was rolled back. |
 | `METRON_LEGACY_INTERNAL_TRANSFER_UNSUPPORTED` | This old internal vault/reserve transfer is retained as history and cannot be reconciled through current runtime operations. |

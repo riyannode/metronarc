@@ -24,15 +24,25 @@ jobs:
           python-version: "3.12"
       - name: Compile Python and validate manifests
         run: |
-          python -m py_compile skills/metron/scripts/*.py
-          python -c 'import json; json.load(open("plugin.json")); json.load(open(".agents/plugins/marketplace.json"))'
+          python -m py_compile skills/metron-policy/scripts/*.py
+          python -c 'import json; from pathlib import Path; plugin=json.load(open("plugin.json")); json.load(open(".agents/plugins/marketplace.json")); assert plugin["version"] == "0.2.0"; assert {p.parent.name for p in Path("skills").glob("*/SKILL.md")} == {"metron-policy", "metron-email", "metron-invoice"}'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - name: Validate invoice renderer and isolated lifecycle
+        run: |
+          cd skills/metron-invoice
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun test
+          python3 -B tests/test_workflow.py -v
       - name: Isolated CLI smoke
         run: |
           state="$(mktemp -d)"
-          METRON_HOME="$state" python3 -B skills/metron/scripts/run.py --help
-          METRON_HOME="$state" python3 -B skills/metron/scripts/run.py init
-          METRON_HOME="$state" python3 -B skills/metron/scripts/run.py status
-          METRON_HOME="$state" python3 -B skills/metron/scripts/run.py dashboard --no-open
+          METRON_HOME="$state" python3 -B skills/metron-policy/scripts/run.py --help
+          METRON_HOME="$state" python3 -B skills/metron-policy/scripts/run.py init
+          METRON_HOME="$state" python3 -B skills/metron-policy/scripts/run.py status
+          METRON_HOME="$state" python3 -B skills/metron-policy/scripts/run.py dashboard --no-open
           grep -q '<title>METRON · Economic Operations</title>' "$state/dashboard.html"
           if grep -Eq 'METRON_(METRICS|SECTIONS|STATUS)' "$state/dashboard.html"; then exit 1; fi
   contracts:

@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 import circle
+import email_state
 import finance
 import registry
 import store
@@ -29,7 +30,7 @@ DASHBOARD_REFRESH_OPERATIONS = frozenset({
 
 def parser() -> argparse.ArgumentParser:
     result=argparse.ArgumentParser(description="METRON local economic control and ledger")
-    result.add_argument("operation",nargs="?",choices=("init","status","config-set","contract-address","goal-create","goal-get","spend-propose","spend-approve","spend-estimate","spend-execute","service-search","service-inspect","circle-terms-status","circle-terms-accept","preflight","wallet-list","wallet-balance","deal-create","deal-get","deal-update","deal-accept","deal-approve","deal-reject","invoice-create","invoice-post","invoice-get","payment-sync","payment-reconcile","registry-sync","registry-recover-spend","journal-list","payment-list","events","dashboard"))
+    result.add_argument("operation",nargs="?",choices=("init","status","config-set","contract-address","goal-create","goal-get","spend-propose","spend-approve","spend-estimate","spend-execute","service-search","service-inspect","circle-terms-status","circle-terms-accept","preflight","wallet-list","wallet-balance","deal-create","deal-get","deal-update","deal-accept","deal-approve","deal-reject","invoice-create","invoice-post","invoice-get","payment-sync","payment-reconcile","registry-sync","registry-recover-spend","journal-list","payment-list","events","dashboard","email-state"))
     result.add_argument("--input",help="Path to a JSON input document")
     result.add_argument("--id",help="METRON entity ID")
     result.add_argument("--provider-ref",help="Circle transaction ID or hash for payment reconciliation")
@@ -271,6 +272,19 @@ def execute(args: argparse.Namespace) -> object:
         if data!={"confirmed":True}: raise finance.DomainError("METRON_CIRCLE_TERMS_CONSENT_REQUIRED")
         return circle.accept_terms()
     if operation=="init": return store.initialize()
+    if operation=="email-state":
+        if not store.DATABASE.is_file(): raise finance.DomainError("METRON_NOT_INITIALIZED")
+        try:
+            with sqlite3.connect(store.DATABASE.as_uri()+"?mode=ro",uri=True) as read_only:
+                tables={row[0] for row in read_only.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                integrity=read_only.execute("PRAGMA integrity_check").fetchone()[0]
+        except sqlite3.DatabaseError:
+            raise finance.DomainError("METRON_STATE_SCHEMA_INVALID") from None
+        if integrity!="ok" or not {"goals","policies","spend_intents","deals","sales_invoices"}.issubset(tables):
+            raise finance.DomainError("METRON_STATE_SCHEMA_INVALID")
+        store.initialize()
+        with store.connect() as db:
+            return email_state.execute(db,data)
     store.initialize()
     if operation=="config-set":
         allowed={"chain","operating_wallet"}
@@ -373,9 +387,7 @@ def execute(args: argparse.Namespace) -> object:
         if operation=="invoice-create": return finance.create_invoice(db,args.id or "",data.get("due_at"))
         if operation=="invoice-post": return finance.post_invoice(db,args.id or "")
         if operation=="invoice-get":
-            row=db.execute("SELECT * FROM sales_invoices WHERE id=?",(args.id or "",)).fetchone()
-            if not row: raise finance.DomainError("METRON_INVOICE_NOT_FOUND")
-            return dict(row)
+            return finance.get_invoice(db,args.id or "")
         if operation=="payment-sync":
             wallet=store.read_config().get("operating_wallet")
             if not wallet: raise finance.DomainError("METRON_WALLET_NOT_CONFIGURED")
