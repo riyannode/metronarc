@@ -30,6 +30,7 @@ class InvoiceWorkflowTest(unittest.TestCase):
                 "policy": {"operating_budget": "5", "max_spend_per_action": "1", "max_daily_spend": "5"},
             },
         )
+        self.goal_id = goal["id"]
         deal = self.call(
             "deal-create",
             data={
@@ -51,11 +52,88 @@ class InvoiceWorkflowTest(unittest.TestCase):
         )
         self.deal_id = deal["id"]
         self.call("deal-update", identifier=self.deal_id, status="NEGOTIATING")
-        self.call("deal-approve", identifier=self.deal_id)
         self.call("deal-accept", identifier=self.deal_id)
 
     def tearDown(self) -> None:
         self.temp.cleanup()
+
+    def test_standard_invoice_terms_do_not_require_custom_terms_approval(self) -> None:
+        deal = self.call(
+            "deal-create",
+            data={
+                "goal_id": self.goal_id,
+                "customer": "Standard Terms Customer",
+                "external_ref": "standard@example.invalid",
+                "amount": "12.30",
+                "terms": {
+                    "payer_wallet": WALLET,
+                    "service_description": "Research and delivery",
+                    "line_items": [{"description": "Research", "quantity": 1, "unit_price_atomic": 12300000}],
+                    "due_at": "2026-11-12",
+                    "billing_name": "Standard Terms Customer",
+                    "billing_email": "standard@example.invalid",
+                    "billing_address": "123 Example Street",
+                    "tax_atomic": 0,
+                    "fee_atomic": 0,
+                },
+            },
+        )
+
+        self.assertEqual(deal["policy_result"], "ALLOW")
+        self.assertEqual(deal["escalation_reasons"], [])
+        self.call("deal-update", identifier=deal["id"], status="NEGOTIATING")
+        accepted = self.call("deal-accept", identifier=deal["id"])
+        self.assertEqual(accepted["status"], "PENDING_HUMAN")
+
+    def test_explicit_custom_terms_and_below_minimum_still_escalate(self) -> None:
+        custom = self.call(
+            "deal-create",
+            data={
+                "goal_id": self.goal_id,
+                "customer": "Custom Terms Customer",
+                "amount": "12.30",
+                "custom_or_legal_terms": True,
+                "terms": {"payer_wallet": WALLET, "service_description": "Custom service"},
+            },
+        )
+        self.assertEqual(custom["policy_result"], "ESCALATE")
+        self.assertEqual(custom["escalation_reasons"], ["CUSTOM_OR_LEGAL_TERMS"])
+        self.call("deal-update", identifier=custom["id"], status="NEGOTIATING")
+        custom_accept = subprocess.run(
+            [sys.executable, "-B", str(CLI), "deal-accept", "--id", custom["id"]],
+            env=self.env, capture_output=True, text=True,
+        )
+        self.assertEqual(json.loads(custom_accept.stdout)["error"]["code"], "METRON_CUSTOM_TERMS_APPROVAL_REQUIRED")
+
+        low_goal = self.call(
+            "goal-create",
+            data={
+                "revenue_target": "10",
+                "policy": {
+                    "operating_budget": "5",
+                    "max_spend_per_action": "1",
+                    "max_daily_spend": "5",
+                    "minimum_deal": "15",
+                },
+            },
+        )
+        below_minimum = self.call(
+            "deal-create",
+            data={
+                "goal_id": low_goal["id"],
+                "customer": "Below Minimum Customer",
+                "amount": "12.30",
+                "terms": {"payer_wallet": WALLET, "service_description": "Standard service"},
+            },
+        )
+        self.assertEqual(below_minimum["policy_result"], "ESCALATE")
+        self.assertEqual(below_minimum["escalation_reasons"], ["BELOW_MINIMUM_DEAL"])
+        self.call("deal-update", identifier=below_minimum["id"], status="NEGOTIATING")
+        minimum_accept = subprocess.run(
+            [sys.executable, "-B", str(CLI), "deal-accept", "--id", below_minimum["id"]],
+            env=self.env, capture_output=True, text=True,
+        )
+        self.assertEqual(json.loads(minimum_accept.stdout)["error"]["code"], "METRON_DEAL_BELOW_MINIMUM")
 
     def call(self, operation: str, *, identifier: str | None = None, status: str | None = None, data: dict | None = None) -> dict | list:
         command = [sys.executable, "-B", str(CLI), operation]

@@ -273,7 +273,8 @@ def create_deal(db: sqlite3.Connection,data: dict) -> dict:
     if not isinstance(custom_or_legal_terms,bool): raise DomainError("METRON_INVALID_DEAL")
     terms=data.get("terms",{})
     if not isinstance(terms,dict): raise DomainError("METRON_INVALID_DEAL")
-    custom_or_legal_terms=custom_or_legal_terms or any(key!="payer_wallet" for key in terms)
+    standard_terms={"payer_wallet","service_description","line_items","due_at","billing_name","billing_email","billing_address","tax_atomic","fee_atomic"}
+    custom_or_legal_terms=custom_or_legal_terms or any(key not in standard_terms for key in terms)
     payer=terms.get("payer_wallet")
     if payer is not None and (not isinstance(payer,str) or len(payer)!=42 or not payer.startswith("0x") or any(ch not in "0123456789abcdefABCDEF" for ch in payer[2:])):
         raise DomainError("METRON_INVALID_DEAL")
