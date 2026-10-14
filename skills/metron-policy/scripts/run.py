@@ -382,7 +382,7 @@ def execute(args: argparse.Namespace) -> object:
         if operation=="deal-create": return finance.create_deal(db,data)
         if operation=="deal-get": return finance.get_deal(db,args.id or "")
         if operation=="deal-update": return finance.update_deal(db,args.id or "",args.entity_status or "")
-        if operation=="deal-accept": return finance.accept_deal(db,args.id or "")
+        if operation=="deal-accept": return finance.accept_deal(db,args.id or "",data or None)
         if operation in {"deal-approve","deal-reject"}: return finance.approve_deal(db,args.id or "",operation=="deal-approve",data.get("payer_wallet"))
         if operation=="invoice-create": return finance.create_invoice(db,args.id or "",data.get("due_at"))
         if operation=="invoice-post": return finance.post_invoice(db,args.id or "")

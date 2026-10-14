@@ -63,6 +63,165 @@ def post_journal(db: sqlite3.Connection, source_type: str, source_id: str, descr
     return journal_id
 
 
+def _validate_customer_scope_terms(terms: dict) -> None:
+    if "scope" in terms and (
+        not isinstance(terms["scope"], str) or not terms["scope"].strip() or len(terms["scope"]) > 2048
+    ):
+        raise DomainError("METRON_INVALID_INPUT")
+    for key in ("subjects", "constraints"):
+        if key not in terms:
+            continue
+        values = terms[key]
+        if not isinstance(values, list) or len(values) > 32 or any(
+            not isinstance(value, str) or not value.strip() or len(value) > 512 for value in values
+        ):
+            raise DomainError("METRON_INVALID_INPUT")
+
+
+def _verify_accepted_offer(
+    db: sqlite3.Connection, amount: int, terms: dict, customer_email: str | None,
+    conversation_id: str, offer_message_id: str, accepted_terms: dict | None = None,
+) -> None:
+    service = terms.get("commercial_service")
+    if not isinstance(service, dict):
+        raise DomainError("METRON_EMAIL_OFFER_MISMATCH")
+    account = str(service.get("account_email") or "").strip().lower()
+    normalized_customer = str(customer_email or "").strip().lower()
+    offer = db.execute(
+        "SELECT o.*,c.account_email AS conversation_account,c.customer_email,c.gmail_thread_id,"
+        "c.commercial_service_id,a.status AS attempt_status,a.gmail_message_id AS sent_message_id,"
+        "a.gmail_thread_id AS sent_thread_id,a.recipient_email,a.conversation_id AS attempt_conversation_id "
+        "FROM email_offers o JOIN email_conversations c ON c.id=o.conversation_id "
+        "JOIN email_send_attempts a ON a.account_email=o.account_email AND a.action_key=o.action_key "
+        "WHERE o.account_email=? AND o.gmail_message_id=?",
+        (account, offer_message_id),
+    ).fetchone()
+    if (
+        offer is None or offer["direction"] != "OUTBOUND" or offer["status"] != "CONFIRMED"
+        or offer["attempt_status"] != "CONFIRMED" or offer["sent_message_id"] != offer_message_id
+        or offer["conversation_id"] != conversation_id or offer["attempt_conversation_id"] != conversation_id
+        or offer["conversation_account"] != account or offer["customer_email"] != normalized_customer
+        or offer["recipient_email"] != normalized_customer or offer["sent_thread_id"] != offer["gmail_thread_id"]
+        or offer["service_id"] != service.get("service_id")
+        or offer["commercial_service_id"] != service.get("service_id")
+        or offer["policy_fingerprint"] != service.get("policy_fingerprint")
+    ):
+        raise DomainError("METRON_EMAIL_OFFER_MISMATCH")
+    try:
+        offered_terms = json.loads(offer["terms_json"])
+    except (TypeError, json.JSONDecodeError):
+        raise DomainError("METRON_EMAIL_OFFER_MISMATCH") from None
+    _validate_customer_scope_terms(offered_terms)
+    if (
+        offered_terms.get("quantity") != terms.get("quantity")
+        or offered_terms.get("service_scope") != terms.get("service_description")
+        or offered_terms.get("deliverables") != terms.get("deliverables")
+        or offered_terms.get("delivery_days") != terms.get("delivery_days")
+        or amount != offer["unit_price_atomic"] * terms.get("quantity", 0)
+    ):
+        raise DomainError("METRON_EMAIL_OFFER_MISMATCH")
+    accepted_terms = accepted_terms or {}
+    _validate_customer_scope_terms(accepted_terms)
+    for key in ("scope", "subjects", "constraints"):
+        if key in offered_terms:
+            if key in accepted_terms and accepted_terms[key] != offered_terms[key]:
+                raise DomainError("METRON_EMAIL_OFFER_MISMATCH")
+            if key in terms and terms[key] != offered_terms[key]:
+                raise DomainError("METRON_EMAIL_OFFER_MISMATCH")
+            if key not in terms:
+                terms[key] = offered_terms[key]
+        elif key in accepted_terms:
+            if key in terms and terms[key] != accepted_terms[key]:
+                raise DomainError("METRON_EMAIL_OFFER_MISMATCH")
+            terms[key] = accepted_terms[key]
+        elif terms.get(key):
+            raise DomainError("METRON_EMAIL_OFFER_MISMATCH")
+    _validate_customer_scope_terms(terms)
+
+
+def _acceptance_evidence(
+    db: sqlite3.Connection, deal_id: str, amount: int, terms: dict, customer_email: str | None,
+    conversation_id: str, evidence: dict,
+) -> tuple[dict, bool]:
+    allowed = {"account_email", "conversation_id", "customer_email", "acceptance_gmail_message_id",
+               "accepted_offer_gmail_message_id", "accepted_terms"}
+    if not isinstance(evidence, dict) or set(evidence) != allowed:
+        raise DomainError("METRON_INVALID_INPUT")
+    account = str(terms["commercial_service"]["account_email"]).strip().lower()
+    supplied_account = evidence["account_email"]
+    supplied_conversation = evidence["conversation_id"]
+    supplied_customer = evidence["customer_email"]
+    acceptance_id = evidence["acceptance_gmail_message_id"]
+    accepted_offer_id = evidence["accepted_offer_gmail_message_id"]
+    accepted_terms = evidence["accepted_terms"]
+    if any(not isinstance(value, str) or not value.strip() or len(value) > 512 for value in
+           (supplied_account, supplied_conversation, supplied_customer, acceptance_id, accepted_offer_id)):
+        raise DomainError("METRON_INVALID_INPUT")
+    if not isinstance(accepted_terms, dict) or set(accepted_terms) - {"scope", "subjects", "constraints"}:
+        raise DomainError("METRON_INVALID_INPUT")
+    _validate_customer_scope_terms(accepted_terms)
+    normalized_customer = supplied_customer.strip().lower()
+    if (
+        supplied_account.strip().lower() != account or supplied_conversation != conversation_id
+        or normalized_customer != str(customer_email or "").strip().lower()
+    ):
+        raise DomainError("METRON_EMAIL_IDENTITY_MISMATCH")
+    conversation = db.execute(
+        "SELECT account_email,customer_email,gmail_thread_id FROM email_conversations WHERE id=?", (conversation_id,)
+    ).fetchone()
+    inbound = db.execute(
+        "SELECT gmail_thread_id,conversation_id,direction FROM email_messages "
+        "WHERE account_email=? AND gmail_message_id=?",
+        (account, acceptance_id.strip()),
+    ).fetchone()
+    if (
+        conversation is None or inbound is None or conversation["account_email"] != account
+        or conversation["customer_email"] != normalized_customer or inbound["direction"] != "INBOUND"
+        or inbound["conversation_id"] != conversation_id
+        or inbound["gmail_thread_id"] != conversation["gmail_thread_id"]
+    ):
+        raise DomainError("METRON_EMAIL_IDENTITY_MISMATCH")
+    offer_message_id = accepted_offer_id.strip()
+    before_hash = hashlib.sha256(json.dumps(terms, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+    _verify_accepted_offer(
+        db, amount, terms, normalized_customer, conversation_id, offer_message_id, accepted_terms,
+    )
+    for key, value in accepted_terms.items():
+        if key in terms and terms[key] != value:
+            raise DomainError("METRON_EMAIL_OFFER_MISMATCH")
+        terms[key] = value
+    after_hash = hashlib.sha256(json.dumps(terms, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+    payload = {
+        "account_email": account,
+        "acceptance_gmail_message_id": acceptance_id.strip(),
+        "accepted_offer_gmail_message_id": offer_message_id,
+        "conversation_id": conversation_id,
+        "customer_email": normalized_customer,
+        "gmail_thread_id": conversation["gmail_thread_id"],
+        "accepted_terms": accepted_terms,
+        "terms_sha256_before": before_hash,
+        "terms_sha256_after": after_hash,
+    }
+    events = db.execute(
+        "SELECT entity_id,data_json FROM events WHERE event_type='CUSTOMER_ACCEPTANCE_EVIDENCE_LINKED'"
+    ).fetchall()
+    for event in events:
+        prior = json.loads(event["data_json"])
+        if event["entity_id"] == deal_id:
+            if (
+                prior.get("acceptance_gmail_message_id") == payload["acceptance_gmail_message_id"]
+                and prior.get("accepted_offer_gmail_message_id") == offer_message_id
+                and prior.get("conversation_id") == conversation_id
+                and prior.get("customer_email") == normalized_customer
+                and prior.get("accepted_terms") == accepted_terms
+            ):
+                return payload, True
+            raise DomainError("METRON_EMAIL_ACCEPTANCE_CONFLICT")
+        if prior.get("acceptance_gmail_message_id") == payload["acceptance_gmail_message_id"]:
+            raise DomainError("METRON_EMAIL_ACCEPTANCE_CONFLICT")
+    return payload, False
+
+
 def create_goal(db: sqlite3.Connection, data: dict) -> dict:
     timestamp = now()
     target = atomic(data.get("revenue_target"))
@@ -275,6 +434,7 @@ def _verify_commercial_service_terms(
     db: sqlite3.Connection, amount: int, terms: dict, customer_email: str | None,
     expected_deal_id: str | None = None, expected_service_id: str | None = None,
 ) -> str | None:
+    _validate_customer_scope_terms(terms)
     service = terms.get("commercial_service")
     if service is None:
         if terms.get("email_conversation_id") is not None or expected_service_id is not None:
@@ -357,7 +517,8 @@ def create_deal(db: sqlite3.Connection,data: dict) -> dict:
     if not isinstance(custom_or_legal_terms,bool): raise DomainError("METRON_INVALID_DEAL")
     terms=data.get("terms",{})
     if not isinstance(terms,dict): raise DomainError("METRON_INVALID_DEAL")
-    standard_terms={"payer_wallet","service_description","line_items","due_at","billing_name","billing_email","billing_address","tax_atomic","fee_atomic","commercial_service","email_conversation_id","quantity","deliverables","delivery_days","capacity_unit"}
+    _validate_customer_scope_terms(terms)
+    standard_terms={"payer_wallet","service_description","line_items","due_at","billing_name","billing_email","billing_address","tax_atomic","fee_atomic","commercial_service","email_conversation_id","quantity","deliverables","delivery_days","capacity_unit","scope","subjects","constraints"}
     custom_or_legal_terms=custom_or_legal_terms or any(key not in standard_terms for key in terms)
     payer=terms.get("payer_wallet")
     if payer is not None and (not isinstance(payer,str) or len(payer)!=42 or not payer.startswith("0x") or any(ch not in "0123456789abcdefABCDEF" for ch in payer[2:])):
@@ -367,6 +528,14 @@ def create_deal(db: sqlite3.Connection,data: dict) -> dict:
         service_conversation_id = _verify_commercial_service_terms(
             db, amount, terms, data.get("external_ref")
         )
+        offer_message_id = data.get("accepted_offer_gmail_message_id")
+        if offer_message_id is not None:
+            if not isinstance(offer_message_id, str) or not offer_message_id.strip() or service_conversation_id is None:
+                raise DomainError("METRON_EMAIL_OFFER_MISMATCH")
+            _verify_accepted_offer(
+                db, amount, terms, data.get("external_ref"), service_conversation_id,
+                offer_message_id.strip(),
+            )
         if originating_spend_intent_id:
             origin=db.execute("SELECT goal_id FROM spend_intents WHERE id=?",(originating_spend_intent_id,)).fetchone()
             if origin is None: raise DomainError("METRON_SPEND_NOT_FOUND")
@@ -406,27 +575,59 @@ def get_deal(db: sqlite3.Connection, deal_id: str) -> dict:
     return dict(row)
 
 
-def accept_deal(db: sqlite3.Connection, deal_id: str) -> dict:
+def accept_deal(db: sqlite3.Connection, deal_id: str, evidence: dict | None = None) -> dict:
     timestamp=now()
     with store.transaction(db):
         row=db.execute("SELECT d.*,p.minimum_deal_atomic,c.external_ref FROM deals d JOIN policies p ON p.goal_id=d.goal_id JOIN counterparties c ON c.id=d.counterparty_id WHERE d.id=?",(deal_id,)).fetchone()
         if row is None: raise DomainError("METRON_DEAL_NOT_FOUND")
-        if row["status"] != "NEGOTIATING": raise DomainError("METRON_INVALID_DEAL_TRANSITION")
+        if row["status"] not in {"NEGOTIATING", "PENDING_HUMAN"}:
+            raise DomainError("METRON_INVALID_DEAL_TRANSITION")
         terms = json.loads(row["terms_json"])
         conversation_id = _verify_commercial_service_terms(
             db, row["amount_atomic"], terms, row["external_ref"], deal_id, row["commercial_service_id"]
         )
+        evidence_payload = None
+        duplicate_evidence = False
+        if conversation_id:
+            if evidence is None:
+                raise DomainError("METRON_EMAIL_ACCEPTANCE_EVIDENCE_REQUIRED")
+            evidence_payload, duplicate_evidence = _acceptance_evidence(
+                db, deal_id, row["amount_atomic"], terms, row["external_ref"], conversation_id, evidence,
+            )
+            if duplicate_evidence:
+                return {"id":deal_id,"status":row["status"],"evidence_linked":True,"duplicate":True}
+        elif evidence is not None:
+            raise DomainError("METRON_EMAIL_ACCEPTANCE_EVIDENCE_INVALID")
+        if row["status"] == "PENDING_HUMAN":
+            if conversation_id is None:
+                raise DomainError("METRON_INVALID_DEAL_TRANSITION")
+            if db.execute(
+                "SELECT 1 FROM events WHERE event_type='CUSTOMER_ACCEPTED' AND entity_type='deal' AND entity_id=? LIMIT 1",
+                (deal_id,),
+            ).fetchone() is None:
+                raise DomainError("METRON_EMAIL_ACCEPTANCE_EVIDENCE_INVALID")
+            if evidence_payload:
+                if evidence_payload["terms_sha256_before"] != evidence_payload["terms_sha256_after"]:
+                    db.execute("UPDATE deals SET terms_json=? WHERE id=?", (json.dumps(terms, sort_keys=True), deal_id))
+                store.event(db,"CUSTOMER_ACCEPTANCE_EVIDENCE_LINKED","deal",deal_id,
+                            "Customer acceptance evidence linked to the existing deal",evidence_payload,timestamp)
+            return {"id":deal_id,"status":"PENDING_HUMAN","evidence_linked":True,"duplicate":False}
+        if row["status"] != "NEGOTIATING": raise DomainError("METRON_INVALID_DEAL_TRANSITION")
         if row["amount_atomic"]<row["minimum_deal_atomic"] and not row["minimum_deal_approved"]:
             raise DomainError("METRON_DEAL_BELOW_MINIMUM")
         if row["custom_or_legal_terms"] and not row["custom_terms_approved"]:
             raise DomainError("METRON_CUSTOM_TERMS_APPROVAL_REQUIRED")
-        db.execute("UPDATE deals SET status='PENDING_HUMAN',accepted_at=? WHERE id=?",(timestamp,deal_id))
+        db.execute("UPDATE deals SET status='PENDING_HUMAN',accepted_at=?,terms_json=? WHERE id=?",
+                   (timestamp,json.dumps(terms,sort_keys=True),deal_id))
         if conversation_id:
             db.execute("UPDATE email_conversations SET state='PENDING_HUMAN',updated_at=? WHERE id=?",
                        (timestamp, conversation_id))
         db.execute("UPDATE counterparties SET kind='CUSTOMER' WHERE id=?",(row["counterparty_id"],))
         store.event(db,"CUSTOMER_ACCEPTED","deal",deal_id,"Customer accepted terms; waiting for human approval",{},timestamp)
-    return {"id":deal_id,"status":"PENDING_HUMAN"}
+        if evidence_payload:
+            store.event(db,"CUSTOMER_ACCEPTANCE_EVIDENCE_LINKED","deal",deal_id,
+                        "Customer acceptance evidence linked to the deal",evidence_payload,timestamp)
+    return {"id":deal_id,"status":"PENDING_HUMAN","evidence_linked":bool(evidence_payload)}
 
 
 def approve_deal(db: sqlite3.Connection, deal_id: str, approved: bool, payer_wallet: str | None=None) -> dict:
@@ -528,7 +729,7 @@ def get_invoice(db: sqlite3.Connection, invoice_id: str) -> dict:
     if term_email is not None and (not isinstance(term_email,str) or not isinstance(billing_email,str) or term_email.strip().lower()!=billing_email.strip().lower()):
         raise DomainError("METRON_EMAIL_IDENTITY_MISMATCH")
     invoice={key:row[key] for key in ("id","deal_id","counterparty_id","amount_atomic","currency","status","issued_at","due_at","paid_at")}
-    allowed_terms=("service_description","line_items","tax_atomic","fee_atomic","billing_name","billing_email","billing_address")
+    allowed_terms=("service_description","line_items","tax_atomic","fee_atomic","billing_name","billing_email","billing_address","quantity","capacity_unit","scope","deliverables","delivery_days","subjects","constraints")
     document_terms={key:terms[key] for key in allowed_terms if key in terms}
     for key in ("tax_atomic","fee_atomic"):
         if key in document_terms and isinstance(document_terms[key],int) and not isinstance(document_terms[key],bool):

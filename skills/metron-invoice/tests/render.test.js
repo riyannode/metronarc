@@ -18,10 +18,20 @@ async function fixture() {
   const invoice = {
     invoice: { id: "INV-000001", deal_id: "DEAL-000001", amount_atomic: "12300000", currency: "USDC", status: "OPEN", issued_at: "2026-10-13T08:00:00Z", due_at: "2026-11-12", paid_at: null },
     customer: { name: "Fixture Customer", email: "customer@fixture.invalid", billing_address: "Test-only billing address" },
-    deal: { id: "DEAL-000001", status: "INVOICED", terms: { line_items: [
-      { description: `Approved research deliverable ${"with detailed scope and review notes ".repeat(14)}`, quantity: "1", unit_price_atomic: "7500000" },
-      { description: "Implementation and handover", quantity: "1", unit_price_atomic: "4800000" },
-    ] } },
+    deal: { id: "DEAL-000001", status: "INVOICED", terms: {
+      service_description: "Approved research scope",
+      scope: "Customer-specific scope",
+      deliverables: ["Written report", "Source references"],
+      delivery_days: 3,
+      quantity: 1,
+      capacity_unit: "reports",
+      subjects: ["Customer-selected subjects"],
+      constraints: ["Use verifiable public sources"],
+      line_items: [
+        { description: `Approved research deliverable ${"with detailed scope and review notes ".repeat(14)}`, quantity: "1", unit_price_atomic: "7500000" },
+        { description: "Implementation and handover", quantity: "1", unit_price_atomic: "4800000" },
+      ],
+    } },
     business: { operating_wallet: "0x1111111111111111111111111111111111111111", chain: "ARC-TESTNET" },
   };
   return { home, invoice };
