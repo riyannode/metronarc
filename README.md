@@ -29,21 +29,7 @@ python3 -B skills/metron-policy/scripts/run.py init
 python3 -B skills/metron-policy/scripts/run.py status
 ```
 
-Create a goal from a JSON file (amounts are exact USDC decimal strings):
-
-```json
-{
-  "revenue_target": "2000",
-  "policy": {
-    "operating_budget": "20",
-    "max_spend_per_action": "0.10",
-    "max_daily_spend": "2",
-    "minimum_wallet_balance": "10",
-    "reinvestment_bps": 1000,
-    "minimum_deal": "450"
-  }
-}
-```
+Create a goal from a JSON file. Supply the target and explicitly choose the operating budget, per-action and daily spend caps, minimum wallet balance, minimum deal amount, and reinvestment share. USDC amounts are exact decimal strings; `reinvestment_bps` is an integer from 0 to 10,000. Goal creation does not apply monetary or reinvestment defaults.
 
 ```sh
 python3 -B skills/metron-policy/scripts/run.py goal-create --input goal.json

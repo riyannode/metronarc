@@ -17,6 +17,7 @@ STATES = {
     "HUMAN_APPROVED", "HUMAN_REJECTED", "INVOICED", "CLOSED_WON", "CLOSED_LOST", "OPTED_OUT",
 }
 DEFAULT_OUTBOUND_PER_24H = 10
+NO_ACTION_CODES = {"AUTOMATED_MESSAGE", "DUPLICATE_CONTEXT", "OPT_OUT", "OUT_OF_SCOPE"}
 
 
 def _input(data: dict, allowed: set[str], required: set[str] = frozenset()) -> None:
@@ -44,6 +45,85 @@ def _json_object(value: object, maximum: int = 16000) -> str:
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     if len(encoded.encode("utf-8")) > maximum:
         raise finance.DomainError("METRON_INVALID_INPUT")
+    return encoded
+
+
+def _blocker_details(value: object) -> str:
+    if not isinstance(value, dict) or set(value) != {"missing", "next_action"}:
+        raise finance.DomainError("METRON_INVALID_INPUT")
+    missing = value["missing"]
+    if not isinstance(missing, list) or not 1 <= len(missing) <= 8:
+        raise finance.DomainError("METRON_INVALID_INPUT")
+    normalized = []
+    for item in missing:
+        if not isinstance(item, str) or not item.strip() or len(item.strip()) > 128:
+            raise finance.DomainError("METRON_INVALID_INPUT")
+        normalized.append(item.strip())
+    if len(set(normalized)) != len(normalized):
+        raise finance.DomainError("METRON_INVALID_INPUT")
+    next_action = value["next_action"]
+    if not isinstance(next_action, str) or not next_action.strip() or len(next_action.strip()) > 512:
+        raise finance.DomainError("METRON_INVALID_INPUT")
+    return _json_object({"missing": normalized, "next_action": next_action.strip()}, 2048)
+
+
+def _service(db: sqlite3.Connection, account: str, service_id: str, *, available: bool = False) -> tuple[dict, str]:
+    result = store.email_service_policy(db, account, service_id)
+    if result is None:
+        raise finance.DomainError("METRON_EMAIL_COMMERCIAL_POLICY_REQUIRED")
+    policy, fingerprint = result
+    remaining = store.email_service_remaining_capacity(db, service_id, policy["available_capacity_units"])
+    if available and (not policy["active"] or remaining <= 0):
+        raise finance.DomainError("METRON_EMAIL_SERVICE_UNAVAILABLE")
+    return policy, fingerprint
+
+
+def _offer_terms(value: object, policy: dict, *, outbound: bool, capacity_limit: int | None = None) -> str:
+    encoded = _json_object(value, 4096)
+    terms = json.loads(encoded)
+    allowed = {"quantity", "service_scope", "deliverables", "delivery_days"}
+    if not outbound:
+        allowed |= {"requested_unit_price_atomic", "payer_wallet", "custom_or_legal_terms"}
+        if set(terms) - allowed:
+            raise finance.DomainError("METRON_INVALID_INPUT")
+        if "quantity" in terms and (isinstance(terms["quantity"], bool) or not isinstance(terms["quantity"], int) or terms["quantity"] < 1):
+            raise finance.DomainError("METRON_INVALID_INPUT")
+        if "service_scope" in terms and (not isinstance(terms["service_scope"], str) or len(terms["service_scope"]) > 2048):
+            raise finance.DomainError("METRON_INVALID_INPUT")
+        if "deliverables" in terms and (
+            not isinstance(terms["deliverables"], list)
+            or any(not isinstance(item, str) or not item.strip() or len(item) > 512 for item in terms["deliverables"])
+        ):
+            raise finance.DomainError("METRON_INVALID_INPUT")
+        if "delivery_days" in terms and (
+            isinstance(terms["delivery_days"], bool) or not isinstance(terms["delivery_days"], int)
+            or terms["delivery_days"] < 1
+        ):
+            raise finance.DomainError("METRON_INVALID_INPUT")
+        if "requested_unit_price_atomic" in terms and (
+            isinstance(terms["requested_unit_price_atomic"], bool)
+            or not isinstance(terms["requested_unit_price_atomic"], int)
+            or terms["requested_unit_price_atomic"] <= 0
+        ):
+            raise finance.DomainError("METRON_INVALID_INPUT")
+        if "custom_or_legal_terms" in terms and not isinstance(terms["custom_or_legal_terms"], bool):
+            raise finance.DomainError("METRON_INVALID_INPUT")
+        if "payer_wallet" in terms:
+            wallet = terms["payer_wallet"]
+            if not isinstance(wallet, str) or len(wallet) != 42 or not wallet.startswith("0x") or any(char not in "0123456789abcdefABCDEF" for char in wallet[2:]):
+                raise finance.DomainError("METRON_INVALID_INPUT")
+        return encoded
+    if set(terms) != allowed:
+        raise finance.DomainError("METRON_INVALID_INPUT")
+    quantity = terms.get("quantity")
+    if (
+        isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1
+        or quantity > (capacity_limit if capacity_limit is not None else policy["available_capacity_units"])
+        or terms.get("service_scope") != policy["service_scope"]
+        or terms.get("deliverables") != policy["deliverables"]
+        or terms.get("delivery_days") != policy["delivery_days"]
+    ):
+        raise finance.DomainError("METRON_EMAIL_OFFER_OUT_OF_POLICY")
     return encoded
 
 
@@ -206,6 +286,96 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
             )
         return {"status": "UPDATED", "account_email": account, "max_outbound_per_24h": limit}
 
+    if action == "service-list":
+        _input(data, {"action", "account_email"}, {"action", "account_email"})
+        account = _email(data, "account_email")
+        services = []
+        for row in db.execute("SELECT id,service_name FROM email_services WHERE account_email=? ORDER BY service_name", (account,)):
+            result = store.email_service_policy(db, account, row["id"])
+            if result is None:
+                services.append({"service_id": row["id"], "service_name": row["service_name"], "valid": False})
+            else:
+                policy, fingerprint = result
+                services.append({"service": {**policy, "policy_fingerprint": fingerprint},
+                                 "valid": True,
+                                 "remaining_capacity_units": store.email_service_remaining_capacity(
+                                     db, row["id"], policy["available_capacity_units"]
+                                 )})
+        return {"account_email": account, "services": services}
+
+    if action == "service-get":
+        _input(data, {"action", "account_email", "service_id"}, {"action", "account_email", "service_id"})
+        account = _email(data, "account_email")
+        service_id = _text(data, "service_id", 64)
+        policy, fingerprint = _service(db, account, service_id)
+        return {"service": {**policy, "policy_fingerprint": fingerprint},
+                "remaining_capacity_units": store.email_service_remaining_capacity(
+                    db, service_id, policy["available_capacity_units"]
+                ), "policy_fingerprint": fingerprint}
+
+    if action == "service-set":
+        _input(data, {"action", "account_email", "owner_token", "service_id", "service_name", "service_scope",
+                      "deliverables", "initial_asking_price_atomic", "minimum_acceptable_price_atomic",
+                      "available_capacity_units", "capacity_unit", "delivery_days", "active"},
+               {"action", "account_email", "owner_token", "service_name", "service_scope", "deliverables",
+                "initial_asking_price_atomic", "minimum_acceptable_price_atomic", "available_capacity_units",
+                "capacity_unit", "delivery_days", "active"})
+        account = _email(data, "account_email")
+        owner = _text(data, "owner_token", 128)
+        service_id = _text(data, "service_id", 64) if data.get("service_id") is not None else None
+        name = _text(data, "service_name", 256)
+        scope = _text(data, "service_scope", 2048)
+        capacity_unit = _text(data, "capacity_unit", 80)
+        deliverables = data["deliverables"]
+        if (
+            not isinstance(deliverables, list) or not deliverables or len(deliverables) > 32
+            or any(not isinstance(item, str) or not item.strip() or len(item.strip()) > 512 for item in deliverables)
+            or len({item.strip() for item in deliverables}) != len(deliverables)
+        ):
+            raise finance.DomainError("METRON_INVALID_INPUT")
+        deliverables_json = json.dumps([item.strip() for item in deliverables], separators=(",", ":"), ensure_ascii=False)
+        asking = data["initial_asking_price_atomic"]
+        minimum = data["minimum_acceptable_price_atomic"]
+        capacity = data["available_capacity_units"]
+        delivery_days = data["delivery_days"]
+        active = data["active"]
+        numeric_values = (asking, minimum, capacity, delivery_days)
+        if (
+            any(isinstance(value, bool) or not isinstance(value, int) or value < 0 or value > 9223372036854775807
+                for value in numeric_values)
+            or asking <= 0 or minimum <= 0 or minimum > asking or delivery_days <= 0
+            or not isinstance(active, bool)
+        ):
+            raise finance.DomainError("METRON_INVALID_INPUT")
+        with store.transaction(db):
+            _lock(db, account, owner)
+            if service_id:
+                existing = db.execute("SELECT id FROM email_services WHERE account_email=? AND id=?", (account, service_id)).fetchone()
+                if existing is None:
+                    raise finance.DomainError("METRON_EMAIL_SERVICE_NOT_FOUND")
+            else:
+                existing = db.execute("SELECT id FROM email_services WHERE account_email=? AND service_name=?", (account, name)).fetchone()
+                service_id = existing["id"] if existing else str(uuid.uuid4())
+            if existing:
+                db.execute(
+                    "UPDATE email_services SET service_name=?,service_scope=?,deliverables_json=?,initial_asking_price_atomic=?,"
+                    "minimum_acceptable_price_atomic=?,available_capacity_units=?,capacity_unit=?,delivery_days=?,active=?,updated_at=datetime('now') "
+                    "WHERE account_email=? AND id=?",
+                    (name, scope, deliverables_json, asking, minimum, capacity, capacity_unit, delivery_days, int(active), account, service_id),
+                )
+            else:
+                db.execute(
+                    "INSERT INTO email_services(id,account_email,service_name,service_scope,deliverables_json,initial_asking_price_atomic,"
+                    "minimum_acceptable_price_atomic,available_capacity_units,capacity_unit,delivery_days,active,updated_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))",
+                    (service_id, account, name, scope, deliverables_json, asking, minimum, capacity, capacity_unit, delivery_days, int(active)),
+                )
+            policy, fingerprint = _service(db, account, service_id)
+            remaining = store.email_service_remaining_capacity(db, service_id, policy["available_capacity_units"])
+            return {"status": "UPDATED" if existing else "CREATED",
+                    "service": {**policy, "policy_fingerprint": fingerprint},
+                    "remaining_capacity_units": remaining, "policy_fingerprint": fingerprint}
+
     if action == "suppression-clear":
         _input(data, {"action", "account_email", "recipient_email", "user_confirmed"},
                {"action", "account_email", "recipient_email", "user_confirmed"})
@@ -230,13 +400,14 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
         return [dict(row) for row in rows]
 
     if action == "conversation-upsert":
-        _input(data, {"action", "account_email", "owner_token", "conversation_key", "gmail_thread_id", "customer_email", "state", "deal_id", "context", "next_follow_up_at"},
+        _input(data, {"action", "account_email", "owner_token", "conversation_key", "gmail_thread_id", "customer_email", "state", "deal_id", "service_id", "context", "next_follow_up_at"},
                {"action", "account_email", "owner_token", "conversation_key", "customer_email"})
         account = _email(data, "account_email")
         owner = _text(data, "owner_token", 128)
         key = _text(data, "conversation_key", 512)
         customer = _email(data, "customer_email")
         thread = _text(data, "gmail_thread_id", 512) if data.get("gmail_thread_id") is not None else None
+        service_id = _text(data, "service_id", 64) if data.get("service_id") is not None else None
         requested_state = data.get("state")
         if requested_state is not None and requested_state not in STATES:
             raise finance.DomainError("METRON_INVALID_INPUT")
@@ -249,6 +420,8 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
             next_follow_up = None
         with store.transaction(db):
             _lock(db, account, owner)
+            if service_id:
+                _service(db, account, service_id)
             by_key = db.execute(
                 "SELECT * FROM email_conversations WHERE account_email=? AND conversation_key=?", (account, key)
             ).fetchone()
@@ -261,6 +434,10 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
             if row:
                 if row["customer_email"] != customer or (row["gmail_thread_id"] and thread and row["gmail_thread_id"] != thread):
                     raise finance.DomainError("METRON_EMAIL_IDENTITY_MISMATCH")
+                if service_id and row["commercial_service_id"] not in {None, service_id}:
+                    linked_offer = db.execute("SELECT 1 FROM email_offers WHERE conversation_id=? LIMIT 1", (row["id"],)).fetchone()
+                    if linked_offer or row["deal_id"]:
+                        raise finance.DomainError("METRON_EMAIL_SERVICE_MISMATCH")
                 deal_id = data.get("deal_id", row["deal_id"])
                 if deal_id is not None and not db.execute("SELECT 1 FROM deals WHERE id=?", (deal_id,)).fetchone():
                     raise finance.DomainError("METRON_DEAL_NOT_FOUND")
@@ -269,32 +446,36 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
                 if row["state"] == "OPTED_OUT" and state != "OPTED_OUT" and _is_suppressed(db, account, customer):
                     raise finance.DomainError("METRON_EMAIL_OPTED_OUT")
                 db.execute(
-                    "UPDATE email_conversations SET gmail_thread_id=?,state=?,deal_id=?,context_json=CASE WHEN ? THEN ? ELSE context_json END,next_follow_up_at=CASE WHEN ? THEN ? ELSE next_follow_up_at END,updated_at=datetime('now') WHERE id=?",
-                    (next_thread, state, deal_id, has_context, context, has_next_follow_up, next_follow_up, row["id"]),
+                    "UPDATE email_conversations SET gmail_thread_id=?,state=?,deal_id=?,commercial_service_id=COALESCE(?,commercial_service_id),"
+                    "context_json=CASE WHEN ? THEN ? ELSE context_json END,next_follow_up_at=CASE WHEN ? THEN ? ELSE next_follow_up_at END,updated_at=datetime('now') WHERE id=?",
+                    (next_thread, state, deal_id, service_id, has_context, context, has_next_follow_up, next_follow_up, row["id"]),
                 )
                 if requested_state == "OPTED_OUT":
                     _record_opt_out(db, account, customer, next_thread)
-                return {"status": "UPDATED", "conversation_id": row["id"], "gmail_thread_id": next_thread, "state": state}
+                return {"status": "UPDATED", "conversation_id": row["id"], "gmail_thread_id": next_thread,
+                        "service_id": service_id or row["commercial_service_id"], "state": state}
             deal_id = data.get("deal_id")
             if deal_id is not None and not db.execute("SELECT 1 FROM deals WHERE id=?", (deal_id,)).fetchone():
                 raise finance.DomainError("METRON_DEAL_NOT_FOUND")
             conversation_id = str(uuid.uuid4())
             state = requested_state or "PROSPECTING"
             db.execute(
-                "INSERT INTO email_conversations(id,account_email,conversation_key,gmail_thread_id,customer_email,state,deal_id,context_json,next_follow_up_at,created_at,updated_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))",
-                (conversation_id, account, key, thread, customer, state, deal_id, context, next_follow_up),
+                "INSERT INTO email_conversations(id,account_email,conversation_key,gmail_thread_id,customer_email,state,deal_id,commercial_service_id,context_json,next_follow_up_at,created_at,updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))",
+                (conversation_id, account, key, thread, customer, state, deal_id, service_id, context, next_follow_up),
             )
             if requested_state == "OPTED_OUT":
                 _record_opt_out(db, account, customer, thread)
-            return {"status": "CREATED", "conversation_id": conversation_id, "gmail_thread_id": thread, "state": state}
+            return {"status": "CREATED", "conversation_id": conversation_id, "gmail_thread_id": thread,
+                    "service_id": service_id, "state": state}
 
     if action == "conversation-update":
-        _input(data, {"action", "account_email", "owner_token", "conversation_id", "state", "deal_id", "context", "next_follow_up_at"},
+        _input(data, {"action", "account_email", "owner_token", "conversation_id", "state", "deal_id", "service_id", "context", "next_follow_up_at"},
                {"action", "account_email", "owner_token", "conversation_id"})
         account = _email(data, "account_email")
         owner = _text(data, "owner_token", 128)
         conversation_id = _text(data, "conversation_id", 64)
+        service_id = _text(data, "service_id", 64) if data.get("service_id") is not None else None
         state = data.get("state")
         if state is not None and state not in STATES:
             raise finance.DomainError("METRON_INVALID_INPUT")
@@ -307,6 +488,12 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
         with store.transaction(db):
             _lock(db, account, owner)
             row = _conversation(db, account, conversation_id)
+            if service_id:
+                _service(db, account, service_id, available=True)
+                if row["commercial_service_id"] not in {None, service_id}:
+                    linked_offer = db.execute("SELECT 1 FROM email_offers WHERE conversation_id=? LIMIT 1", (conversation_id,)).fetchone()
+                    if linked_offer or row["deal_id"]:
+                        raise finance.DomainError("METRON_EMAIL_SERVICE_MISMATCH")
             next_state = state or row["state"]
             if row["state"] == "OPTED_OUT" and next_state != "OPTED_OUT" and _is_suppressed(db, account, row["customer_email"]):
                 raise finance.DomainError("METRON_EMAIL_OPTED_OUT")
@@ -314,12 +501,89 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
             if deal_id is not None and not db.execute("SELECT 1 FROM deals WHERE id=?", (deal_id,)).fetchone():
                 raise finance.DomainError("METRON_DEAL_NOT_FOUND")
             db.execute(
-                "UPDATE email_conversations SET state=COALESCE(?,state),deal_id=?,context_json=COALESCE(?,context_json),next_follow_up_at=CASE WHEN ? THEN ? ELSE next_follow_up_at END,updated_at=datetime('now') WHERE id=?",
-                (state, deal_id, context, has_next_follow_up, next_follow_up, conversation_id),
+                "UPDATE email_conversations SET state=COALESCE(?,state),deal_id=?,commercial_service_id=COALESCE(?,commercial_service_id),"
+                "context_json=COALESCE(?,context_json),next_follow_up_at=CASE WHEN ? THEN ? ELSE next_follow_up_at END,updated_at=datetime('now') WHERE id=?",
+                (state, deal_id, service_id, context, has_next_follow_up, next_follow_up, conversation_id),
             )
             if state == "OPTED_OUT":
                 _record_opt_out(db, account, row["customer_email"], row["gmail_thread_id"])
-            return {"status": "UPDATED", "conversation_id": conversation_id, "state": state or row["state"]}
+            return {"status": "UPDATED", "conversation_id": conversation_id,
+                    "service_id": service_id or row["commercial_service_id"], "state": state or row["state"]}
+
+    if action == "offer-record":
+        _input(data, {"action", "account_email", "owner_token", "conversation_id", "service_id", "direction",
+                      "action_key", "gmail_message_id", "unit_price_atomic", "terms"},
+               {"action", "account_email", "owner_token", "conversation_id", "service_id", "direction",
+                "unit_price_atomic", "terms"})
+        account = _email(data, "account_email")
+        owner = _text(data, "owner_token", 128)
+        conversation_id = _text(data, "conversation_id", 64)
+        service_id = _text(data, "service_id", 64)
+        direction = data["direction"]
+        if direction not in {"INBOUND", "OUTBOUND"}:
+            raise finance.DomainError("METRON_INVALID_INPUT")
+        action_key = _text(data, "action_key", 512) if data.get("action_key") is not None else None
+        message_id = _text(data, "gmail_message_id", 512) if data.get("gmail_message_id") is not None else None
+        unit_price = data["unit_price_atomic"]
+        if isinstance(unit_price, bool) or not isinstance(unit_price, int) or unit_price <= 0 or unit_price > 9223372036854775807:
+            raise finance.DomainError("METRON_INVALID_INPUT")
+        if (direction == "INBOUND" and (action_key is not None or message_id is None)) or (direction == "OUTBOUND" and (action_key is None or message_id is not None)):
+            raise finance.DomainError("METRON_INVALID_INPUT")
+        terms_json = _json_object(data["terms"], 4096)
+        with store.transaction(db):
+            _lock(db, account, owner)
+            conversation = _conversation(db, account, conversation_id)
+            if conversation["commercial_service_id"] != service_id:
+                raise finance.DomainError("METRON_EMAIL_SERVICE_MISMATCH")
+            existing = db.execute(
+                "SELECT * FROM email_offers WHERE account_email=? AND "
+                "((action_key IS NOT NULL AND action_key=?) OR (gmail_message_id IS NOT NULL AND gmail_message_id=?))",
+                (account, action_key, message_id),
+            ).fetchone()
+            if existing:
+                if (existing["conversation_id"], existing["service_id"], existing["direction"],
+                    existing["unit_price_atomic"], existing["terms_json"]) != (
+                    conversation_id, service_id, direction, unit_price, terms_json
+                ):
+                    raise finance.DomainError("METRON_EMAIL_OFFER_CONFLICT")
+                return {"status": existing["status"], "offer_id": existing["id"], "duplicate": True}
+            policy, fingerprint = _service(db, account, service_id, available=direction == "OUTBOUND")
+            if direction == "OUTBOUND":
+                if not policy["minimum_acceptable_price_atomic"] <= unit_price <= policy["initial_asking_price_atomic"]:
+                    raise finance.DomainError("METRON_EMAIL_OFFER_OUT_OF_POLICY")
+                remaining = store.email_service_remaining_capacity(db, service_id, policy["available_capacity_units"])
+                terms_json = _offer_terms(json.loads(terms_json), policy, outbound=True, capacity_limit=remaining)
+                attempt = db.execute(
+                    "SELECT * FROM email_send_attempts WHERE account_email=? AND action_key=? AND conversation_id=?",
+                    (account, action_key, conversation_id),
+                ).fetchone()
+                if attempt is None or attempt["action_kind"] == "INVOICE" or attempt["status"] not in {"PREPARED", "CONFIRMED"}:
+                    raise finance.DomainError("METRON_EMAIL_ACTION_NOT_FOUND")
+                gmail_message_id = attempt["gmail_message_id"] if attempt["status"] == "CONFIRMED" else None
+                status = "CONFIRMED" if gmail_message_id else "PREPARED"
+            else:
+                inbound = db.execute(
+                    "SELECT 1 FROM email_messages WHERE account_email=? AND gmail_message_id=? AND conversation_id=? "
+                    "AND direction='INBOUND'",
+                    (account, message_id, conversation_id),
+                ).fetchone()
+                if inbound is None:
+                    raise finance.DomainError("METRON_EMAIL_MESSAGE_NOT_FOUND")
+                terms_json = _offer_terms(json.loads(terms_json), policy, outbound=False)
+                if json.loads(terms_json).get("requested_unit_price_atomic") != unit_price:
+                    raise finance.DomainError("METRON_INVALID_INPUT")
+                gmail_message_id = message_id
+                status = "RECEIVED"
+            offer_id = str(uuid.uuid4())
+            db.execute(
+                "INSERT INTO email_offers(id,account_email,conversation_id,service_id,direction,action_key,gmail_message_id,"
+                "unit_price_atomic,terms_json,policy_fingerprint,status,created_at,updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))",
+                (offer_id, account, conversation_id, service_id, direction, action_key, gmail_message_id,
+                 unit_price, terms_json, fingerprint, status),
+            )
+            return {"status": status, "offer_id": offer_id, "duplicate": False,
+                    "unit_price_atomic": unit_price, "policy_fingerprint": fingerprint}
 
     if action == "message-claim":
         _input(data, {"action", "account_email", "owner_token", "gmail_message_id", "gmail_thread_id", "customer_email", "lease_seconds"},
@@ -341,7 +605,42 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
             if row:
                 if row["gmail_thread_id"] != thread or row["conversation_id"] != conversation["id"] or row["direction"] != "INBOUND":
                     raise finance.DomainError("METRON_EMAIL_IDENTITY_MISMATCH")
+                blocker = db.execute(
+                    "SELECT status,service_id,policy_fingerprint FROM email_message_events "
+                    "WHERE account_email=? AND gmail_message_id=? AND event_type='BLOCKER'",
+                    (account, message_id),
+                ).fetchone()
+                if blocker and blocker["status"] == "OPEN":
+                    return {"status": "BLOCKED_COMMERCIAL_POLICY", "conversation_id": conversation["id"]}
                 if row["status"] == "PROCESSED":
+                    if blocker and blocker["status"] == "RESOLVED":
+                        terminal = db.execute(
+                            "SELECT event_type FROM email_message_events WHERE account_email=? AND gmail_message_id=? "
+                            "AND event_type IN ('NO_ACTION','REPLY_CONFIRMED') LIMIT 1",
+                            (account, message_id),
+                        ).fetchone()
+                        if terminal:
+                            return {
+                                "status": "DUPLICATE_ACTION_EXISTS" if terminal["event_type"] == "REPLY_CONFIRMED" else "DUPLICATE",
+                                "conversation_id": conversation["id"],
+                            }
+                        prior_reply = db.execute(
+                            "SELECT 1 FROM email_send_attempts WHERE account_email=? AND source_message_id=? AND action_kind='REPLY' LIMIT 1",
+                            (account, message_id),
+                        ).fetchone()
+                        if prior_reply:
+                            return {"status": "DUPLICATE_ACTION_EXISTS", "conversation_id": conversation["id"]}
+                        try:
+                            _, current_fingerprint = _service(db, account, blocker["service_id"], available=True)
+                        except finance.DomainError:
+                            return {"status": "BLOCKED_COMMERCIAL_POLICY", "conversation_id": conversation["id"]}
+                        if current_fingerprint != blocker["policy_fingerprint"]:
+                            return {"status": "BLOCKED_COMMERCIAL_POLICY", "conversation_id": conversation["id"]}
+                        db.execute(
+                            "UPDATE email_messages SET status='PROCESSING',claimed_by=?,lease_until=datetime('now',?),error_code=NULL WHERE id=?",
+                            (owner, f"+{lease} seconds", row["id"]),
+                        )
+                        return {"status": "RECOVERED", "conversation_id": conversation["id"]}
                     return {"status": "DUPLICATE", "conversation_id": conversation["id"]}
                 if row["status"] == "PROCESSING" and row["claimed_by"] == owner:
                     return {"status": "ALREADY_CLAIMED", "conversation_id": conversation["id"]}
@@ -365,9 +664,11 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
             return {"status": "CLAIMED", "conversation_id": conversation["id"]}
 
     if action in {"message-complete", "message-fail"}:
-        allowed = {"action", "account_email", "owner_token", "gmail_message_id", "error_code"}
+        allowed = {"action", "account_email", "owner_token", "gmail_message_id", "error_code", "no_action_code"}
         required = {"action", "account_email", "owner_token", "gmail_message_id"}
         _input(data, allowed, required)
+        if action == "message-fail" and "no_action_code" in data:
+            raise finance.DomainError("METRON_INVALID_INPUT")
         account = _email(data, "account_email")
         owner = _text(data, "owner_token", 128)
         message_id = _text(data, "gmail_message_id", 512)
@@ -389,11 +690,222 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
             if unresolved:
                 raise finance.DomainError("METRON_EMAIL_SEND_UNRESOLVED")
             if action == "message-complete":
+                confirmed_reply = db.execute(
+                    "SELECT id FROM email_send_attempts WHERE account_email=? AND source_message_id=? AND action_kind='REPLY' AND status='CONFIRMED' LIMIT 1",
+                    (account, message_id),
+                ).fetchone()
+                blocker = db.execute(
+                    "SELECT status FROM email_message_events WHERE account_email=? AND gmail_message_id=? AND event_type='BLOCKER'",
+                    (account, message_id),
+                ).fetchone()
+                if confirmed_reply:
+                    db.execute(
+                        "INSERT OR IGNORE INTO email_message_events(id,account_email,gmail_message_id,conversation_id,event_type,reason_code,details_json,created_at,updated_at) "
+                        "VALUES (?,?,?,?,'REPLY_CONFIRMED','GMAIL_REPLY_CONFIRMED',?,datetime('now'),datetime('now'))",
+                        (str(uuid.uuid4()), account, message_id, row["conversation_id"], _json_object({"send_attempt_id": confirmed_reply["id"]})),
+                    )
+                elif blocker and blocker["status"] == "OPEN":
+                    pass
+                elif "no_action_code" in data:
+                    reason = _text(data, "no_action_code", 64)
+                    if reason not in NO_ACTION_CODES:
+                        raise finance.DomainError("METRON_INVALID_INPUT")
+                    details = "{}"
+                    db.execute(
+                        "INSERT OR IGNORE INTO email_message_events(id,account_email,gmail_message_id,conversation_id,event_type,reason_code,details_json,created_at,updated_at) "
+                        "VALUES (?,?,?,?,'NO_ACTION',?,?,datetime('now'),datetime('now'))",
+                        (str(uuid.uuid4()), account, message_id, row["conversation_id"], reason, details),
+                    )
+                else:
+                    raise finance.DomainError("METRON_EMAIL_ACTION_REQUIRED")
                 db.execute("UPDATE email_messages SET status='PROCESSED',processed_at=datetime('now'),lease_until=NULL WHERE id=?", (row["id"],))
                 return {"status": "PROCESSED"}
             error = _text(data, "error_code", 128) if data.get("error_code") else "METRON_EMAIL_PROCESSING_FAILED"
             db.execute("UPDATE email_messages SET status='FAILED',error_code=?,lease_until=NULL WHERE id=?", (error, row["id"]))
             return {"status": "FAILED", "error_code": error}
+
+    if action == "blocker-record":
+        _input(data, {"action", "account_email", "owner_token", "gmail_message_id", "blocker_code", "details"},
+               {"action", "account_email", "owner_token", "gmail_message_id", "blocker_code", "details"})
+        account = _email(data, "account_email")
+        owner = _text(data, "owner_token", 128)
+        message_id = _text(data, "gmail_message_id", 512)
+        code = _text(data, "blocker_code", 64)
+        if not re.fullmatch(r"[A-Z][A-Z0-9_]*", code):
+            raise finance.DomainError("METRON_INVALID_INPUT")
+        details = _blocker_details(data["details"])
+        with store.transaction(db):
+            _lock(db, account, owner)
+            message = db.execute(
+                "SELECT * FROM email_messages WHERE account_email=? AND gmail_message_id=? AND direction='INBOUND'",
+                (account, message_id),
+            ).fetchone()
+            if message is None:
+                raise finance.DomainError("METRON_EMAIL_MESSAGE_NOT_FOUND")
+            if message["status"] == "PROCESSING" and message["claimed_by"] != owner:
+                raise finance.DomainError("METRON_EMAIL_MESSAGE_LOCKED")
+            if message["status"] not in {"PROCESSING", "PROCESSED"}:
+                raise finance.DomainError("METRON_EMAIL_MESSAGE_LOCKED")
+            prior_attempt = db.execute(
+                "SELECT status FROM email_send_attempts WHERE account_email=? AND source_message_id=? AND action_kind='REPLY' LIMIT 1",
+                (account, message_id),
+            ).fetchone()
+            if prior_attempt and prior_attempt["status"] != "FAILED":
+                raise finance.DomainError("METRON_EMAIL_REPLY_ALREADY_ATTEMPTED")
+            terminal = db.execute(
+                "SELECT 1 FROM email_message_events WHERE account_email=? AND gmail_message_id=? "
+                "AND event_type IN ('NO_ACTION','REPLY_CONFIRMED') LIMIT 1",
+                (account, message_id),
+            ).fetchone()
+            if terminal:
+                raise finance.DomainError("METRON_EMAIL_MESSAGE_ALREADY_FINALIZED")
+            existing = db.execute(
+                "SELECT * FROM email_message_events WHERE account_email=? AND gmail_message_id=? AND event_type='BLOCKER'",
+                (account, message_id),
+            ).fetchone()
+            if existing:
+                if existing["reason_code"] != code or existing["details_json"] != details:
+                    raise finance.DomainError("METRON_EMAIL_BLOCKER_CONFLICT")
+                if message["status"] == "PROCESSING":
+                    db.execute(
+                        "UPDATE email_messages SET status='PROCESSED',processed_at=datetime('now'),lease_until=NULL WHERE id=?",
+                        (message["id"],),
+                    )
+                return {"status": "EXISTS", "blocker_id": existing["id"],
+                        "delivery_acknowledged": existing["delivery_acknowledged_at"] is not None}
+            event_id = str(uuid.uuid4())
+            db.execute(
+                "INSERT INTO email_message_events(id,account_email,gmail_message_id,conversation_id,event_type,reason_code,details_json,status,created_at,updated_at) "
+                "VALUES (?,?,?,?,'BLOCKER',?,?, 'OPEN',datetime('now'),datetime('now'))",
+                (event_id, account, message_id, message["conversation_id"], code, details),
+            )
+            if message["status"] == "PROCESSING":
+                db.execute(
+                    "UPDATE email_messages SET status='PROCESSED',processed_at=datetime('now'),lease_until=NULL WHERE id=?",
+                    (message["id"],),
+                )
+            return {"status": "RECORDED", "blocker_id": event_id, "delivery_acknowledged": False}
+
+    if action == "blocker-report":
+        _input(data, {"action", "account_email", "owner_token"}, {"action", "account_email", "owner_token"})
+        account = _email(data, "account_email")
+        owner = _text(data, "owner_token", 128)
+        with store.transaction(db):
+            _lock(db, account, owner)
+            rows = db.execute(
+                "SELECT e.id,e.gmail_message_id,e.conversation_id,e.reason_code,e.details_json,e.service_id,e.created_at,e.delivery_attempted_at,"
+                "e.delivery_acknowledged_at,e.delivery_reference,c.gmail_thread_id,c.customer_email "
+                "FROM email_message_events e JOIN email_conversations c ON c.id=e.conversation_id "
+                "WHERE e.account_email=? AND e.event_type='BLOCKER' AND e.status='OPEN' "
+                "AND e.delivery_acknowledged_at IS NULL ORDER BY e.created_at",
+                (account,),
+            ).fetchall()
+            if rows:
+                ids = [row["id"] for row in rows]
+                db.executemany("UPDATE email_message_events SET delivery_attempted_at=datetime('now'),updated_at=datetime('now') WHERE id=?", [(item,) for item in ids])
+            blockers = [
+                {**dict(row), "details": json.loads(row["details_json"])} for row in rows
+            ]
+            for blocker in blockers:
+                blocker.pop("details_json")
+            return {"status": "DELIVERY_PENDING_ACK" if blockers else "NO_PENDING_BLOCKERS", "blockers": blockers}
+
+    if action == "blocker-ack":
+        _input(data, {"action", "account_email", "owner_token", "blocker_id", "delivery_reference"},
+               {"action", "account_email", "owner_token", "blocker_id", "delivery_reference"})
+        account = _email(data, "account_email")
+        owner = _text(data, "owner_token", 128)
+        blocker_id = _text(data, "blocker_id", 64)
+        delivery_reference = _text(data, "delivery_reference", 256)
+        with store.transaction(db):
+            _lock(db, account, owner)
+            blocker = db.execute(
+                "SELECT id,status,delivery_attempted_at,delivery_acknowledged_at,delivery_reference FROM email_message_events "
+                "WHERE account_email=? AND id=? AND event_type='BLOCKER'",
+                (account, blocker_id),
+            ).fetchone()
+            if blocker is None:
+                raise finance.DomainError("METRON_EMAIL_BLOCKER_NOT_FOUND")
+            if blocker["delivery_acknowledged_at"] is not None:
+                if blocker["delivery_reference"] != delivery_reference:
+                    raise finance.DomainError("METRON_EMAIL_BLOCKER_ACK_CONFLICT")
+                return {"status": "ALREADY_ACKNOWLEDGED", "blocker_id": blocker_id,
+                        "delivery_reference": delivery_reference}
+            if blocker["status"] != "OPEN":
+                raise finance.DomainError("METRON_EMAIL_BLOCKER_NOT_OPEN")
+            if blocker["delivery_attempted_at"] is None:
+                raise finance.DomainError("METRON_EMAIL_BLOCKER_NOT_REPORTED")
+            db.execute(
+                "UPDATE email_message_events SET delivery_acknowledged_at=datetime('now'),delivery_reference=?,updated_at=datetime('now') "
+                "WHERE id=? AND delivery_acknowledged_at IS NULL",
+                (delivery_reference, blocker_id),
+            )
+            return {"status": "ACKNOWLEDGED", "blocker_id": blocker_id,
+                    "delivery_reference": delivery_reference}
+
+    if action == "blocker-resolve":
+        _input(data, {"action", "account_email", "owner_token", "gmail_message_id", "service_id"},
+               {"action", "account_email", "owner_token", "gmail_message_id"})
+        account = _email(data, "account_email")
+        owner = _text(data, "owner_token", 128)
+        message_id = _text(data, "gmail_message_id", 512)
+        service_id = _text(data, "service_id", 64) if data.get("service_id") is not None else None
+        with store.transaction(db):
+            _lock(db, account, owner)
+            blocker = db.execute(
+                "SELECT * FROM email_message_events WHERE account_email=? AND gmail_message_id=? AND event_type='BLOCKER'",
+                (account, message_id),
+            ).fetchone()
+            if blocker is None:
+                raise finance.DomainError("METRON_EMAIL_BLOCKER_NOT_FOUND")
+            if service_id is None:
+                raise finance.DomainError("METRON_EMAIL_COMMERCIAL_POLICY_REQUIRED")
+            message = db.execute(
+                "SELECT status FROM email_messages WHERE account_email=? AND gmail_message_id=? AND direction='INBOUND'",
+                (account, message_id),
+            ).fetchone()
+            if message is None or message["status"] != "PROCESSED":
+                raise finance.DomainError("METRON_EMAIL_MESSAGE_LOCKED")
+            policy, fingerprint = _service(db, account, service_id, available=True)
+            if blocker["status"] == "RESOLVED":
+                if blocker["policy_fingerprint"] == fingerprint and blocker["service_id"] == service_id:
+                    return {"status": "ALREADY_RESOLVED", "blocker_id": blocker["id"],
+                            "service": policy, "policy_fingerprint": fingerprint}
+                terminal = db.execute(
+                    "SELECT 1 FROM email_message_events WHERE account_email=? AND gmail_message_id=? "
+                    "AND event_type IN ('NO_ACTION','REPLY_CONFIRMED')",
+                    (account, message_id),
+                ).fetchone()
+                reply_attempt = db.execute(
+                    "SELECT 1 FROM email_send_attempts WHERE account_email=? AND source_message_id=? "
+                    "AND action_kind='REPLY' AND status!='FAILED'",
+                    (account, message_id),
+                ).fetchone()
+                if terminal or reply_attempt:
+                    raise finance.DomainError("METRON_EMAIL_MESSAGE_ALREADY_FINALIZED")
+                db.execute(
+                    "UPDATE email_message_events SET service_id=?,policy_fingerprint=?,updated_at=datetime('now') WHERE id=?",
+                    (service_id, fingerprint, blocker["id"]),
+                )
+                db.execute("UPDATE email_conversations SET commercial_service_id=?,updated_at=datetime('now') WHERE id=?",
+                           (service_id, blocker["conversation_id"]))
+                return {"status": "RESOLVED", "blocker_id": blocker["id"],
+                        "service": {**policy, "policy_fingerprint": fingerprint}, "policy_fingerprint": fingerprint}
+            terminal = db.execute(
+                "SELECT 1 FROM email_message_events WHERE account_email=? AND gmail_message_id=? "
+                "AND event_type IN ('NO_ACTION','REPLY_CONFIRMED')",
+                (account, message_id),
+            ).fetchone()
+            if terminal:
+                raise finance.DomainError("METRON_EMAIL_MESSAGE_ALREADY_FINALIZED")
+            db.execute(
+                "UPDATE email_message_events SET status='RESOLVED',service_id=?,policy_fingerprint=?,updated_at=datetime('now') WHERE id=?",
+                (service_id, fingerprint, blocker["id"]),
+            )
+            db.execute("UPDATE email_conversations SET commercial_service_id=?,updated_at=datetime('now') WHERE id=?",
+                       (service_id, blocker["conversation_id"]))
+            return {"status": "RESOLVED", "blocker_id": blocker["id"],
+                    "service": {**policy, "policy_fingerprint": fingerprint}, "policy_fingerprint": fingerprint}
 
     if action == "send-prepare":
         _input(data, {"action", "account_email", "owner_token", "conversation_id", "action_key", "action_kind", "source_message_id", "invoice_id", "recipient_email", "content_sha256"},
@@ -496,6 +1008,26 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
                     return {"status": "FAILED", "attempt_id": attempt["id"], "error_code": "METRON_EMAIL_OPTED_OUT"}
                 if attempt["action_kind"] == "INVOICE":
                     _invoice_for_delivery(db, attempt["invoice_id"], conversation, attempt["recipient_email"])
+                offer = db.execute(
+                    "SELECT service_id,policy_fingerprint,terms_json FROM email_offers WHERE account_email=? AND action_key=? "
+                    "AND direction='OUTBOUND'",
+                    (account, key),
+                ).fetchone()
+                if offer:
+                    try:
+                        policy, fingerprint = _service(db, account, offer["service_id"], available=True)
+                    except finance.DomainError as exc:
+                        if exc.code == "METRON_EMAIL_SERVICE_UNAVAILABLE":
+                            raise
+                        raise finance.DomainError("METRON_EMAIL_SERVICE_POLICY_STALE") from None
+                    if fingerprint != offer["policy_fingerprint"]:
+                        raise finance.DomainError("METRON_EMAIL_SERVICE_POLICY_STALE")
+                    terms = json.loads(offer["terms_json"])
+                    remaining = store.email_service_remaining_capacity(
+                        db, offer["service_id"], policy["available_capacity_units"]
+                    )
+                    if terms["quantity"] > remaining:
+                        raise finance.DomainError("METRON_EMAIL_SERVICE_UNAVAILABLE")
                 configured_limit = db.execute(
                     "SELECT max_outbound_per_24h FROM email_account_limits WHERE account_email=?", (account,)
                 ).fetchone()
@@ -516,12 +1048,16 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
                 if attempt["status"] != "SUBMITTING":
                     raise finance.DomainError("METRON_EMAIL_SEND_UNRESOLVED")
                 db.execute("UPDATE email_send_attempts SET status='UNKNOWN',updated_at=datetime('now'),error_code='METRON_EMAIL_SEND_AMBIGUOUS' WHERE id=?", (attempt["id"],))
+                db.execute("UPDATE email_offers SET status='UNKNOWN',updated_at=datetime('now') WHERE account_email=? AND action_key=? AND status='PREPARED'",
+                           (account, key))
                 return {"status": "UNKNOWN", "attempt_id": attempt["id"]}
             if action == "send-fail":
                 if data["not_sent_confirmed"] is not True or attempt["status"] != "SUBMITTING":
                     raise finance.DomainError("METRON_EMAIL_SEND_UNRESOLVED")
                 error = _text(data, "error_code", 128) if data.get("error_code") else "METRON_EMAIL_SEND_FAILED"
                 db.execute("UPDATE email_send_attempts SET status='FAILED',updated_at=datetime('now'),error_code=? WHERE id=?", (error, attempt["id"]))
+                db.execute("UPDATE email_offers SET status='FAILED',updated_at=datetime('now') WHERE account_email=? AND action_key=? AND status='PREPARED'",
+                           (account, key))
                 return {"status": "FAILED", "attempt_id": attempt["id"], "error_code": error}
             message_id = _text(data, "gmail_message_id", 512)
             thread = _text(data, "gmail_thread_id", 512)
@@ -552,23 +1088,46 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
                 "VALUES (?,?,?,?,'OUTBOUND','PROCESSED',datetime('now'),datetime('now'))",
                 (account, message_id, thread, conversation["id"]),
             )
+            db.execute(
+                "UPDATE email_offers SET status='CONFIRMED',gmail_message_id=?,updated_at=datetime('now') "
+                "WHERE account_email=? AND action_key=? AND direction='OUTBOUND' AND status IN ('PREPARED','UNKNOWN')",
+                (message_id, account, key),
+            )
             return {"status": "CONFIRMED", "attempt_id": attempt["id"], "gmail_message_id": message_id, "gmail_thread_id": thread, "duplicate": False}
 
     if action == "state-list":
         _input(data, {"action", "account_email"}, {"action", "account_email"})
         account = _email(data, "account_email")
         conversations = [dict(row) for row in db.execute(
-            "SELECT id,conversation_key,gmail_thread_id,customer_email,state,deal_id,context_json,last_confirmed_action,next_follow_up_at,updated_at FROM email_conversations WHERE account_email=? ORDER BY updated_at DESC",
+            "SELECT id,conversation_key,gmail_thread_id,customer_email,state,deal_id,commercial_service_id,context_json,last_confirmed_action,next_follow_up_at,updated_at FROM email_conversations WHERE account_email=? ORDER BY updated_at DESC",
             (account,),
         ).fetchall()]
         messages = [dict(row) for row in db.execute(
             "SELECT gmail_message_id,gmail_thread_id,conversation_id,direction,status,received_at,processed_at,error_code FROM email_messages WHERE account_email=? ORDER BY received_at DESC LIMIT 200",
             (account,),
         ).fetchall()]
+        message_events = [
+            {**dict(row), "details": json.loads(row["details_json"])}
+            for row in db.execute(
+                "SELECT id,gmail_message_id,conversation_id,event_type,reason_code,details_json,status,service_id,policy_fingerprint,reported_at,"
+                "delivery_attempted_at,delivery_acknowledged_at,delivery_reference,created_at,updated_at "
+                "FROM email_message_events WHERE account_email=? ORDER BY created_at DESC LIMIT 200",
+                (account,),
+            ).fetchall()
+        ]
+        for event in message_events:
+            event.pop("details_json")
         attempts = [dict(row) for row in db.execute(
             "SELECT id,action_key,conversation_id,action_kind,invoice_id,source_message_id,recipient_email,status,gmail_message_id,gmail_thread_id,error_code,updated_at FROM email_send_attempts WHERE account_email=? ORDER BY updated_at DESC LIMIT 200",
             (account,),
         ).fetchall()]
+        commercial_offers = [dict(row) for row in db.execute(
+            "SELECT id,conversation_id,service_id,direction,action_key,gmail_message_id,unit_price_atomic,terms_json,"
+            "policy_fingerprint,status,created_at,updated_at FROM email_offers WHERE account_email=? ORDER BY created_at",
+            (account,),
+        ).fetchall()]
+        for offer in commercial_offers:
+            offer["terms"] = json.loads(offer.pop("terms_json"))
         suppressed = [dict(row) for row in db.execute(
             "SELECT recipient_email,source_thread_id,opted_out_at FROM email_contact_suppressions WHERE account_email=? ORDER BY opted_out_at DESC",
             (account,),
@@ -579,7 +1138,9 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
         return {
             "conversations": conversations,
             "messages": messages,
+            "message_events": message_events,
             "send_attempts": attempts,
+            "commercial_offers": commercial_offers,
             "suppressed_contacts": suppressed,
             "max_outbound_per_24h": configured_limit["max_outbound_per_24h"] if configured_limit else DEFAULT_OUTBOUND_PER_24H,
             "send_limit_configured": configured_limit is not None,

@@ -24,6 +24,18 @@ The CLI returns stable codes in `{"ok":false,"error":{"code":...,"message":...}}
 | `METRON_EMAIL_SUPPRESSION_CHANGE_REQUIRES_USER` | Clearing a recipient suppression requires a direct user request; email content cannot authorize it. |
 | `METRON_EMAIL_MESSAGE_NOT_FOUND` | The requested Gmail message is not recorded in the associated conversation. Read and claim the exact message before replying. |
 | `METRON_EMAIL_MESSAGE_LOCKED` | This message is not claimed by the current run. Do not process or reply until the active claim is resolved. |
+| `METRON_EMAIL_MESSAGE_ALREADY_FINALIZED` | The inbound message already has a terminal `NO_ACTION` or `REPLY_CONFIRMED` event; do not reopen it through a blocker. |
+| `METRON_EMAIL_COMMERCIAL_POLICY_REQUIRED` | No complete service policy exists for the selected account and service; keep the blocker open until an operator configures one. |
+| `METRON_EMAIL_SERVICE_NOT_FOUND` | The selected service ID is not in this Gmail account's catalog. Read `service-list` and use a matching ID. |
+| `METRON_EMAIL_SERVICE_UNAVAILABLE` | The selected service is inactive or has no available capacity. Do not quote it or accept its terms. |
+| `METRON_EMAIL_SERVICE_POLICY_STALE` | A selected service policy or its account/thread binding changed after it was read. Reload the current service and re-evaluate the conversation. |
+| `METRON_EMAIL_SERVICE_MISMATCH` | The conversation is already bound to another service with commercial activity. Do not mix its offer or deal history with a different service. |
+| `METRON_EMAIL_OFFER_OUT_OF_POLICY` | A proposed price, quantity, scope, deliverable, or timeline is outside the selected service's persisted bounds. Do not send or accept it. |
+| `METRON_EMAIL_OFFER_CONFLICT` | An offer idempotency key or Gmail message ID was reused with different offer data. Preserve the existing record and inspect it. |
+| `METRON_EMAIL_BLOCKER_NOT_FOUND` | No blocker exists for the supplied account and blocker ID. |
+| `METRON_EMAIL_BLOCKER_NOT_OPEN` | Only an open blocker can receive a new delivery acknowledgement. |
+| `METRON_EMAIL_BLOCKER_NOT_REPORTED` | Surface the blocker with `blocker-report` before acknowledging delivery. |
+| `METRON_EMAIL_BLOCKER_ACK_CONFLICT` | The blocker was already acknowledged with a different visible delivery reference; inspect state instead of overwriting it. |
 | `METRON_EMAIL_ACTION_NOT_FOUND` | No durable send attempt exists for the supplied action key. Prepare the action before starting or confirming it. |
 | `METRON_EMAIL_ACTION_CONFLICT` | The action key was reused with different content or identity. Do not send; inspect the existing attempt. |
 | `METRON_EMAIL_SEND_UNRESOLVED` | A send is prepared, submitting, or ambiguous. Read the existing thread and do not send again until authoritative connector evidence resolves it. |

@@ -23,11 +23,11 @@ After installing the plugin:
 1. Ask `Use METRON. Show status.`
 2. Initialize with `python3 -B skills/metron-policy/scripts/run.py init` if state does not exist.
 3. Configure `chain` and `operating_wallet`, authenticate the Circle Agent Wallet through Circle CLI, and fund that wallet directly.
-4. Create a goal from a JSON file with `goal-create --input path.json`.
+4. Create a goal from a JSON file with `goal-create --input path.json`, explicitly providing the revenue target and every monetary/reinvestment policy value.
 
-EconomicRegistry is METRON's shared non-custodial provenance contract on Arc Testnet at `0x547552585d8d995c5063820b2950e0db52b4cab4` (chain ID `5042002`). Users do not deploy or fund it. Configure and fund only the Circle operating wallet for normal payment operations.
+EconomicRegistry is METRON's shared non-custodial provenance contract on Arc Testnet at `0x547552585d8d995c5063820b2950e0db52b4cab4` (chain ID `5042002`). Users do not deploy or fund it. Configure and fund only the Circle operating wallet for normal payment operations. Configure each offered service through `metron-email`'s `service-set` agent operation; each service stores its own scope, deliverables, prices, capacity, timeline, and active status.
 
-The repository marketplace installs one plugin containing the discoverable `metron-policy` and `metron-email` skills. The repository marketplace uses the current portable root `plugin.json` format. Marketplace visibility and installation must be verified in the actual target client; parsing manifests alone is not installation verification.
+The repository marketplace installs one plugin containing the discoverable `metron-policy`, `metron-email`, and `metron-invoice` skills. The repository marketplace uses the current portable root `plugin.json` format. Marketplace visibility and installation must be verified in the actual target client; parsing manifests alone is not installation verification.
 
 ## Circle setup
 
