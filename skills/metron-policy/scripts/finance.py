@@ -81,6 +81,7 @@ def _validate_customer_scope_terms(terms: dict) -> None:
 def _verify_accepted_offer(
     db: sqlite3.Connection, amount: int, terms: dict, customer_email: str | None,
     conversation_id: str, offer_message_id: str, accepted_terms: dict | None = None,
+    *, historical_backfill: bool = False,
 ) -> None:
     service = terms.get("commercial_service")
     if not isinstance(service, dict):
@@ -131,17 +132,18 @@ def _verify_accepted_offer(
             if key not in terms:
                 terms[key] = offered_terms[key]
         elif key in accepted_terms:
-            if key in terms and terms[key] != accepted_terms[key]:
+            if not historical_backfill or (key in terms and terms[key] != accepted_terms[key]):
                 raise DomainError("METRON_EMAIL_OFFER_MISMATCH")
-            terms[key] = accepted_terms[key]
-        elif terms.get(key):
+            if key not in terms:
+                terms[key] = accepted_terms[key]
+        elif key in terms:
             raise DomainError("METRON_EMAIL_OFFER_MISMATCH")
     _validate_customer_scope_terms(terms)
 
 
 def _acceptance_evidence(
     db: sqlite3.Connection, deal_id: str, amount: int, terms: dict, customer_email: str | None,
-    conversation_id: str, evidence: dict,
+    conversation_id: str, evidence: dict, *, historical_backfill: bool = False,
 ) -> tuple[dict, bool]:
     allowed = {"account_email", "conversation_id", "customer_email", "acceptance_gmail_message_id",
                "accepted_offer_gmail_message_id", "accepted_terms"}
@@ -185,6 +187,7 @@ def _acceptance_evidence(
     before_hash = hashlib.sha256(json.dumps(terms, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
     _verify_accepted_offer(
         db, amount, terms, normalized_customer, conversation_id, offer_message_id, accepted_terms,
+        historical_backfill=historical_backfill,
     )
     for key, value in accepted_terms.items():
         if key in terms and terms[key] != value:
@@ -202,22 +205,37 @@ def _acceptance_evidence(
         "terms_sha256_before": before_hash,
         "terms_sha256_after": after_hash,
     }
-    events = db.execute(
-        "SELECT entity_id,data_json FROM events WHERE event_type='CUSTOMER_ACCEPTANCE_EVIDENCE_LINKED'"
+    same_deal_events = db.execute(
+        "SELECT data_json FROM events WHERE event_type='CUSTOMER_ACCEPTANCE_EVIDENCE_LINKED' "
+        "AND entity_type='deal' AND entity_id=?",
+        (deal_id,),
     ).fetchall()
-    for event in events:
+    for event in same_deal_events:
         prior = json.loads(event["data_json"])
-        if event["entity_id"] == deal_id:
-            if (
-                prior.get("acceptance_gmail_message_id") == payload["acceptance_gmail_message_id"]
-                and prior.get("accepted_offer_gmail_message_id") == offer_message_id
-                and prior.get("conversation_id") == conversation_id
-                and prior.get("customer_email") == normalized_customer
-                and prior.get("accepted_terms") == accepted_terms
-            ):
-                return payload, True
+        if (
+            prior.get("account_email") != account
+            or prior.get("acceptance_gmail_message_id") != payload["acceptance_gmail_message_id"]
+            or prior.get("accepted_offer_gmail_message_id") != offer_message_id
+            or prior.get("conversation_id") != conversation_id
+            or prior.get("customer_email") != normalized_customer
+            or prior.get("gmail_thread_id") != conversation["gmail_thread_id"]
+            or prior.get("accepted_terms") != accepted_terms
+        ):
             raise DomainError("METRON_EMAIL_ACCEPTANCE_CONFLICT")
-        if prior.get("acceptance_gmail_message_id") == payload["acceptance_gmail_message_id"]:
+    if same_deal_events:
+        return payload, True
+    matching_evidence = db.execute(
+        "SELECT entity_id,data_json FROM events WHERE event_type='CUSTOMER_ACCEPTANCE_EVIDENCE_LINKED' "
+        "AND entity_type='deal' AND instr(data_json,?)>0 AND instr(data_json,?)>0",
+        (json.dumps(account), json.dumps(payload["acceptance_gmail_message_id"])),
+    ).fetchall()
+    for event in matching_evidence:
+        prior = json.loads(event["data_json"])
+        if (
+            event["entity_id"] != deal_id
+            and prior.get("account_email") == account
+            and prior.get("acceptance_gmail_message_id") == payload["acceptance_gmail_message_id"]
+        ):
             raise DomainError("METRON_EMAIL_ACCEPTANCE_CONFLICT")
     return payload, False
 
@@ -593,6 +611,7 @@ def accept_deal(db: sqlite3.Connection, deal_id: str, evidence: dict | None = No
                 raise DomainError("METRON_EMAIL_ACCEPTANCE_EVIDENCE_REQUIRED")
             evidence_payload, duplicate_evidence = _acceptance_evidence(
                 db, deal_id, row["amount_atomic"], terms, row["external_ref"], conversation_id, evidence,
+                historical_backfill=row["status"] == "PENDING_HUMAN",
             )
             if duplicate_evidence:
                 return {"id":deal_id,"status":row["status"],"evidence_linked":True,"duplicate":True}
