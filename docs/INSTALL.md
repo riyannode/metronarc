@@ -10,6 +10,8 @@
 
 ### Current manual path
 
+The repository is currently private, so only GitHub accounts with existing access can add this marketplace. Public installation by a new user requires a separately authorized repository visibility change.
+
 1. In ChatGPT desktop, open Plugins and choose Add marketplace from a repository.
 2. Enter `https://github.com/riyannode/metronarc` and select ref `master`.
 3. Select the METRON marketplace and install/enable METRON.

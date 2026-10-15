@@ -45,6 +45,8 @@ All runtime state is stored under `~/.metron/`, outside the plugin source/cache.
 
 In ChatGPT desktop, open Plugins, add a marketplace from the repository `https://github.com/riyannode/metronarc` at ref `master`, install METRON, then start a fresh chat and ask “Set up METRON.”
 
+The repository is currently private. This path works only for GitHub accounts that already have repository access; public first-time installation remains blocked until the owner separately authorizes a visibility change.
+
 ### Future npm bootstrap
 
 Bootstrap CLI prepared for npm publication. After the package is published, run `npx @riyannode/metron`. The npm package only registers the GitHub marketplace and prints setup steps; the canonical plugin remains in this repository. This command is not available until npm publication.

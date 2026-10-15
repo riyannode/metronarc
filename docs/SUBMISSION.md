@@ -1,6 +1,6 @@
 # Tameion submission readiness
 
-Status checked 2026-10-16 (Asia/Jakarta). This page records the pilot evidence available in METRON's existing local ledger and the remaining submission gates. It is not a claim that the hackathon application or a video has been submitted. The event page lists the deadline as October 17, 2026 at 11:59 PM ET and requires a public GitHub repository plus a recorded video under three minutes; deployment is optional.
+Status checked 2026-10-16 (Asia/Jakarta). This page records the pilot evidence available in METRON's existing local ledger and the remaining submission gates. It is not a claim that the hackathon application or a video has been submitted. The event page lists the deadline as October 17, 2026 at 11:59 PM ET and requires a public GitHub repository plus a recorded video under three minutes; a deployed link is optional but strongly encouraged.
 
 ## Thesis
 
