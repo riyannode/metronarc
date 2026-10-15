@@ -33,8 +33,8 @@ The CLI returns stable codes in `{"ok":false,"error":{"code":...,"message":...}}
 | `METRON_EMAIL_OFFER_OUT_OF_POLICY` | A proposed price, quantity, scope, deliverable, or timeline is outside the selected service's persisted bounds. Do not send or accept it. |
 | `METRON_EMAIL_OFFER_CONFLICT` | An offer idempotency key or Gmail message ID was reused with different offer data. Preserve the existing record and inspect it. |
 | `METRON_EMAIL_OFFER_MISMATCH` | The selected confirmed outbound offer does not match the deal's customer, conversation, service snapshot, price, or structured terms. Stop; do not accept or amend the deal silently. |
-| `METRON_EMAIL_ACCEPTANCE_EVIDENCE_REQUIRED` | An email-bound deal needs the verified inbound acceptance and selected confirmed outbound offer IDs before acceptance can proceed. Reread the original thread and pass the structured evidence input. |
-| `METRON_EMAIL_ACCEPTANCE_EVIDENCE_INVALID` | The existing deal is not eligible for evidence-only linkage or its historical acceptance state is missing. Preserve status and events and inspect the ledger. |
+| `METRON_EMAIL_ACCEPTANCE_EVIDENCE_REQUIRED` | An email-bound deal needs verified acceptance evidence before acceptance and final human approval. Reread the original thread and link the structured evidence with `deal-accept`. |
+| `METRON_EMAIL_ACCEPTANCE_EVIDENCE_INVALID` | The linked email acceptance evidence is malformed, stale, duplicated, or inconsistent with the deal terms. Preserve status and events and inspect the ledger. |
 | `METRON_EMAIL_ACCEPTANCE_CONFLICT` | This deal already has different acceptance evidence, or this acceptance Gmail message is linked to another deal. Preserve the existing event and inspect both threads. |
 | `METRON_EMAIL_BLOCKER_NOT_FOUND` | No blocker exists for the supplied account and blocker ID. |
 | `METRON_EMAIL_BLOCKER_NOT_OPEN` | Only an open blocker can receive a new delivery acknowledgement. |

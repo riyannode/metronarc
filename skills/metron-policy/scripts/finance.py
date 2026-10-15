@@ -676,10 +676,62 @@ def approve_deal(db: sqlite3.Connection, deal_id: str, approved: bool, payer_wal
         if row["status"] != "PENDING_HUMAN": raise DomainError("METRON_HUMAN_APPROVAL_REQUIRED")
         terms=json.loads(row["terms_json"])
         if approved:
-            if row["commercial_service_id"] is not None or terms.get("commercial_service") is not None:
-                _verify_commercial_service_terms(
+            linked_conversation = db.execute(
+                "SELECT id FROM email_conversations WHERE deal_id=? LIMIT 1", (deal_id,)
+            ).fetchone()
+            evidence_rows = db.execute(
+                "SELECT data_json FROM events WHERE event_type='CUSTOMER_ACCEPTANCE_EVIDENCE_LINKED' "
+                "AND entity_type='deal' AND entity_id=?",
+                (deal_id,),
+            ).fetchall()
+            email_bound = (
+                row["commercial_service_id"] is not None
+                or terms.get("commercial_service") is not None
+                or terms.get("email_conversation_id") is not None
+                or linked_conversation is not None
+                or bool(evidence_rows)
+            )
+            if email_bound:
+                conversation_id = _verify_commercial_service_terms(
                     db, row["amount_atomic"], terms, row["external_ref"], deal_id, row["commercial_service_id"]
                 )
+                if conversation_id is None:
+                    raise DomainError("METRON_EMAIL_SERVICE_POLICY_STALE")
+                if not evidence_rows:
+                    raise DomainError("METRON_EMAIL_ACCEPTANCE_EVIDENCE_REQUIRED")
+                if len(evidence_rows) != 1:
+                    raise DomainError("METRON_EMAIL_ACCEPTANCE_EVIDENCE_INVALID")
+                try:
+                    evidence_payload = json.loads(evidence_rows[0]["data_json"])
+                except (TypeError, json.JSONDecodeError):
+                    raise DomainError("METRON_EMAIL_ACCEPTANCE_EVIDENCE_INVALID") from None
+                if not isinstance(evidence_payload, dict):
+                    raise DomainError("METRON_EMAIL_ACCEPTANCE_EVIDENCE_INVALID")
+                before_hash = evidence_payload.get("terms_sha256_before")
+                stored_terms_hash = hashlib.sha256(
+                    json.dumps(terms, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+                ).hexdigest()
+                if (
+                    not isinstance(before_hash, str) or len(before_hash) != 64
+                    or any(char not in "0123456789abcdef" for char in before_hash)
+                    or evidence_payload.get("terms_sha256_after") != stored_terms_hash
+                ):
+                    raise DomainError("METRON_EMAIL_ACCEPTANCE_EVIDENCE_INVALID")
+                evidence = {
+                    "account_email": evidence_payload.get("account_email"),
+                    "conversation_id": evidence_payload.get("conversation_id"),
+                    "customer_email": evidence_payload.get("customer_email"),
+                    "acceptance_gmail_message_id": evidence_payload.get("acceptance_gmail_message_id"),
+                    "accepted_offer_gmail_message_id": evidence_payload.get("accepted_offer_gmail_message_id"),
+                    "accepted_terms": evidence_payload.get("accepted_terms"),
+                }
+                # Historical offer metadata may omit terms; validate them in memory against the stored hash.
+                validated_evidence, duplicate = _acceptance_evidence(
+                    db, deal_id, row["amount_atomic"], dict(terms), row["external_ref"], conversation_id,
+                    evidence, historical_backfill=True,
+                )
+                if not duplicate or validated_evidence["terms_sha256_after"] != stored_terms_hash:
+                    raise DomainError("METRON_EMAIL_ACCEPTANCE_EVIDENCE_INVALID")
             payer=payer_wallet or terms.get("payer_wallet")
             if not isinstance(payer,str) or len(payer)!=42 or not payer.startswith("0x") or any(ch not in "0123456789abcdefABCDEF" for ch in payer[2:]):
                 raise DomainError("METRON_COUNTERPARTY_UNVERIFIED")
