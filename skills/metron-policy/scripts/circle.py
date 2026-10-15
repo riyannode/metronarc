@@ -31,6 +31,12 @@ class _GatewayNoRedirectHandler(HTTPRedirectHandler):
 
 
 GATEWAY_MAX_RESPONSE_BYTES=65536
+ARC_TESTNET_RPC="https://rpc.blockdaemon.testnet.arc.io"
+ARC_TESTNET_CHAIN_ID=5042002
+ARC_SYSTEM_USDC_EMITTER="0xfffffffffffffffffffffffffffffffffffffffe"
+ARC_ERC20_USDC_CONTRACT="0x3600000000000000000000000000000000000000"
+ARC_TRANSFER_TOPIC="0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+ARC_RPC_MAX_RESPONSE_BYTES=1048576
 
 
 def executable() -> list[str]:
@@ -464,7 +470,7 @@ def normalize_gateway_x402_transfer(record: dict,expected_id: str | None=None,ex
     if sending_chain!=receiving_chain or expected_chain and sending_chain!=expected_chain.upper(): raise CircleError("METRON_UNSUPPORTED_CHAIN")
     tx_hash=record.get("txHash")
     if tx_hash is not None and (not isinstance(tx_hash,str) or re.fullmatch(r"0x[0-9a-fA-F]{64}",tx_hash) is None): raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
-    return {"provider":"CIRCLE","provider_ref":transfer_id,"evidence_type":"CIRCLE_GATEWAY_X402_TRANSFER","status":status,"direction":"OUT","amount_atomic":_atomic_from_provider(amount,direct=True),"currency":"USDC","to_address":recipient,"from_address":sender,"tx_hash":tx_hash,"chain":sending_chain,"raw_evidence_hash":hashlib.sha256(json.dumps(record,sort_keys=True,separators=(",",":"),default=str).encode()).hexdigest()}
+    return {"provider":"CIRCLE","provider_ref":transfer_id,"evidence_type":"CIRCLE_GATEWAY_X402_TRANSFER","status":status,"settlement_verified":status in {"confirmed","completed"},"direction":"OUT","amount_atomic":_atomic_from_provider(amount,direct=True),"currency":"USDC","to_address":recipient,"from_address":sender,"tx_hash":tx_hash,"chain":sending_chain,"raw_evidence_hash":hashlib.sha256(json.dumps(record,sort_keys=True,separators=(",",":"),default=str).encode()).hexdigest()}
 
 
 def contract_addresses(category: str, chain: str) -> dict:
@@ -558,10 +564,157 @@ def _atomic_from_provider(value, direct: bool=False) -> int:
     return units
 
 
-def normalize_transaction(record: dict) -> dict:
+def _arc_rpc(method: str, params: list):
+    body=json.dumps({"jsonrpc":"2.0","id":1,"method":method,"params":params}).encode()
+    request=Request(ARC_TESTNET_RPC,data=body,headers={"Accept":"application/json","Content-Type":"application/json"},method="POST")
+    try:
+        with build_opener(_GatewayNoRedirectHandler).open(request,timeout=10) as response:
+            raw=response.read(ARC_RPC_MAX_RESPONSE_BYTES+1)
+    except (HTTPError,URLError,TimeoutError,OSError):
+        raise CircleError("METRON_PAYMENT_AMBIGUOUS") from None
+    if len(raw)>ARC_RPC_MAX_RESPONSE_BYTES:
+        raise CircleError("METRON_PAYMENT_AMBIGUOUS")
+    try:
+        payload=json.loads(raw)
+    except (json.JSONDecodeError,UnicodeDecodeError):
+        raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED") from None
+    if not isinstance(payload,dict) or payload.get("jsonrpc")!="2.0" or type(payload.get("id")) is not int or payload["id"]!=1:
+        raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+    if payload.get("error") is not None or "result" not in payload:
+        raise CircleError("METRON_PAYMENT_AMBIGUOUS")
+    return payload["result"]
+
+
+def arc_transaction_receipt(tx_hash: str) -> dict:
+    if not isinstance(tx_hash,str) or re.fullmatch(r"0x[0-9a-fA-F]{64}",tx_hash) is None:
+        raise CircleError("METRON_RECONCILIATION_MISMATCH")
+    chain_id=_arc_rpc("eth_chainId",[])
+    try:
+        actual_chain_id=int(chain_id,16) if isinstance(chain_id,str) and chain_id.startswith("0x") else -1
+    except ValueError:
+        actual_chain_id=-1
+    if actual_chain_id!=ARC_TESTNET_CHAIN_ID:
+        raise CircleError("METRON_RECONCILIATION_MISMATCH")
+    transaction=_arc_rpc("eth_getTransactionByHash",[tx_hash])
+    receipt=_arc_rpc("eth_getTransactionReceipt",[tx_hash])
+    if not isinstance(transaction,dict) or not isinstance(receipt,dict):
+        raise CircleError("METRON_PAYMENT_AMBIGUOUS")
+    receipt={**receipt,"transaction":transaction}
+    return receipt
+
+
+def _arc_receipt_amount(record: dict, amount, direct: bool) -> int:
+    asset_value=_first(record,("currency","token","symbol","assetSymbol","tokenSymbol"))
+    asset=str(asset_value or "").upper() if not isinstance(asset_value,dict) else str(_first(asset_value,("symbol","name")) or "").upper()
+    if amount is not None:
+        if asset and asset!="USDC":
+            raise CircleError("METRON_RECONCILIATION_MISMATCH")
+        return _atomic_from_provider(amount,direct)
+    if asset and asset!="USDC":
+        raise CircleError("METRON_RECONCILIATION_MISMATCH")
+    amounts=record.get("amounts")
+    if not isinstance(amounts,list) or len(amounts)!=1 or not isinstance(amounts[0],str):
+        raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+    return _atomic_from_provider(amounts[0])
+
+
+def _arc_transfer_log(log: dict, tx_hash: str, block_hash: str, block_height: int) -> tuple[str,str,int]:
+    topics=log.get("topics")
+    data=log.get("data")
+    try:
+        log_block=int(log.get("blockNumber"),16) if isinstance(log.get("blockNumber"),str) and log["blockNumber"].startswith("0x") else -1
+    except ValueError:
+        log_block=-1
+    if (log.get("removed") is not False
+        or str(log.get("transactionHash","")).lower()!=tx_hash.lower()
+        or str(log.get("blockHash","")).lower()!=block_hash.lower()
+        or log_block!=block_height):
+        raise CircleError("METRON_RECONCILIATION_MISMATCH")
+    if (not isinstance(topics,list) or len(topics)!=3
+        or str(topics[0]).lower()!=ARC_TRANSFER_TOPIC
+        or any(not isinstance(topic,str) or re.fullmatch(r"0x[0-9a-fA-F]{64}",topic) is None for topic in topics)
+        or re.fullmatch(r"0x0{24}[0-9a-fA-F]{40}",topics[1]) is None
+        or re.fullmatch(r"0x0{24}[0-9a-fA-F]{40}",topics[2]) is None
+        or not isinstance(data,str) or re.fullmatch(r"0x[0-9a-fA-F]{64}",data) is None):
+        raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+    return "0x"+topics[1][-40:].lower(),"0x"+topics[2][-40:].lower(),int(data,16)
+
+
+def _verify_arc_system_transfer(record: dict, receipt: dict, amount_atomic: int) -> tuple[str,str]:
+    if not isinstance(receipt,dict) or str(receipt.get("status","")).lower()!="0x1":
+        raise CircleError("METRON_RECONCILIATION_MISMATCH")
+    tx_hash=_first(record,("txHash","tx_hash","transactionHash","hash"))
+    block_hash=record.get("blockHash")
+    block_height=record.get("blockHeight")
+    if (not isinstance(tx_hash,str) or re.fullmatch(r"0x[0-9a-fA-F]{64}",tx_hash) is None
+        or not isinstance(block_hash,str) or re.fullmatch(r"0x[0-9a-fA-F]{64}",block_hash) is None
+        or not isinstance(block_height,int) or isinstance(block_height,bool) or block_height<0):
+        raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+    try:
+        receipt_block=int(receipt.get("blockNumber"),16) if isinstance(receipt.get("blockNumber"),str) and receipt["blockNumber"].startswith("0x") else -1
+    except ValueError:
+        receipt_block=-1
+    if (str(receipt.get("transactionHash","")).lower()!=tx_hash.lower()
+        or str(receipt.get("blockHash","")).lower()!=block_hash.lower()
+        or receipt_block!=block_height):
+        raise CircleError("METRON_RECONCILIATION_MISMATCH")
+    transaction=receipt.get("transaction")
+    try:
+        transaction_block=int(transaction.get("blockNumber"),16) if isinstance(transaction,dict) and isinstance(transaction.get("blockNumber"),str) and transaction["blockNumber"].startswith("0x") else -1
+    except ValueError:
+        transaction_block=-1
+    if (not isinstance(transaction,dict)
+        or str(transaction.get("hash","")).lower()!=tx_hash.lower()
+        or str(transaction.get("blockHash","")).lower()!=block_hash.lower()
+        or transaction_block!=block_height):
+        raise CircleError("METRON_RECONCILIATION_MISMATCH")
+    source=_first(record,("sourceAddress","fromAddress","from_address","sender","source"))
+    destination=_first(record,("destinationAddress","toAddress","to_address","recipient","destination"))
+    if not _is_evm_address(source) or not _is_evm_address(destination):
+        raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+    logs=receipt.get("logs")
+    if not isinstance(logs,list):
+        raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+    system_transfers=[]
+    erc20_transfers=[]
+    for log in logs:
+        if not isinstance(log,dict):
+            raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+        emitter=str(log.get("address","")).lower()
+        if emitter not in {ARC_SYSTEM_USDC_EMITTER,ARC_ERC20_USDC_CONTRACT}:
+            topics=log.get("topics")
+            if isinstance(topics,list) and topics and str(topics[0]).lower()==ARC_TRANSFER_TOPIC:
+                raise CircleError("METRON_RECONCILIATION_MISMATCH")
+            continue
+        topics=log.get("topics")
+        if not isinstance(topics,list) or not topics:
+            raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+        if str(topics[0]).lower()!=ARC_TRANSFER_TOPIC:
+            if emitter==ARC_SYSTEM_USDC_EMITTER:
+                raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+            # Other canonical USDC contract events, such as Approval, do not represent a transfer.
+            continue
+        parsed=_arc_transfer_log(log,tx_hash,block_hash,block_height)
+        (system_transfers if emitter==ARC_SYSTEM_USDC_EMITTER else erc20_transfers).append(parsed)
+    if len(system_transfers)!=1:
+        raise CircleError("METRON_RECONCILIATION_MISMATCH")
+    system_from,system_to,native_atomic=system_transfers[0]
+    if system_from!=source.lower() or system_to!=destination.lower() or native_atomic%10**12 or native_atomic//10**12!=amount_atomic:
+        raise CircleError("METRON_RECONCILIATION_MISMATCH")
+    if erc20_transfers:
+        if len(erc20_transfers)!=1:
+            raise CircleError("METRON_RECONCILIATION_MISMATCH")
+        erc20_from,erc20_to,erc20_atomic=erc20_transfers[0]
+        if erc20_from!=system_from or erc20_to!=system_to or erc20_atomic!=amount_atomic:
+            raise CircleError("METRON_RECONCILIATION_MISMATCH")
+    return system_from,system_to
+
+
+def normalize_transaction(record: dict, receipt: dict | None=None) -> dict:
     if not isinstance(record,dict):
         raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
-    status=str(_first(record,("state","status")) or "").lower()
+    provider_status=str(_first(record,("state","status")) or "").lower()
+    status="unverified" if provider_status in {"complete","confirmed"} else provider_status
     direction=str(_first(record,("direction","txType","transactionType")) or "").upper()
     direction={"INBOUND":"IN","OUTBOUND":"OUT","TRANSFER_IN":"IN","TRANSFER_OUT":"OUT"}.get(direction,direction)
     amount=_first(record,("amountAtomic","amount_atomic","amount","value"))
@@ -585,9 +738,35 @@ def normalize_transaction(record: dict) -> dict:
     tx_hash=_first(record,("txHash","tx_hash","transactionHash","hash"))
     chain=_first(record,("chain","blockchain"))
     if isinstance(chain,dict): chain=_first(chain,("name","id"))
-    if not provider_ref or amount is None:
+    if not provider_ref:
         raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
-    return {"provider":"CIRCLE","provider_ref":str(provider_ref),"evidence_type":"CIRCLE_TRANSACTION","status":status,"direction":direction,"amount_atomic":_atomic_from_provider(amount,direct),"currency":asset,"to_address":to_address,"from_address":from_address,"tx_hash":tx_hash,"chain":chain,"raw_evidence_hash":hashlib.sha256(json.dumps(record,sort_keys=True,separators=(",",":"),default=str).encode()).hexdigest()}
+    if receipt is not None:
+        operation=str(record.get("operation") or "").upper()
+        if provider_status!="complete" or not _is_arc_testnet_chain(chain) or operation!="TRANSFER" or direction not in {"IN","OUT"}:
+            raise CircleError("METRON_RECONCILIATION_MISMATCH")
+        amount_atomic=_arc_receipt_amount(record,amount,direct)
+        from_address,to_address=_verify_arc_system_transfer(record,receipt,amount_atomic)
+        raw_evidence={"circle":record,"arc_receipt":receipt}
+        status="confirmed"
+        asset="USDC"
+        settlement_verified=True
+    elif amount is None and _is_arc_testnet_chain(chain) and isinstance(record.get("amounts"),list) and len(record["amounts"])==1 and isinstance(record["amounts"][0],str):
+        amount_atomic=None
+        asset=""
+        if provider_status not in {"complete","confirmed"}:
+            status=provider_status
+        settlement_verified=False
+    elif provider_status=="complete":
+        amount_atomic=None if amount is None else _atomic_from_provider(amount,direct)
+        settlement_verified=False
+    else:
+        if amount is None:
+            raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
+        amount_atomic=_atomic_from_provider(amount,direct)
+        settlement_verified=False
+    if receipt is None:
+        raw_evidence=record
+    return {"provider":"CIRCLE","provider_ref":str(provider_ref),"evidence_type":"CIRCLE_TRANSACTION","status":status,"provider_status":provider_status,"settlement_verified":settlement_verified,"direction":direction,"amount_atomic":amount_atomic,"currency":asset or None,"to_address":to_address,"from_address":from_address,"tx_hash":tx_hash,"chain":chain,"raw_evidence_hash":hashlib.sha256(json.dumps(raw_evidence,sort_keys=True,separators=(",",":"),default=str).encode()).hexdigest()}
 
 
 def records(response: dict) -> list[dict]:
@@ -609,5 +788,11 @@ def _transaction_references(record: dict) -> set[str]:
 def find_transaction(response: dict, provider_ref: str) -> dict:
     for record in records(response):
         if isinstance(record,dict) and provider_ref in _transaction_references(record):
+            status=str(_first(record,("state","status")) or "").lower()
+            chain=_first(record,("chain","blockchain"))
+            if isinstance(chain,dict): chain=_first(chain,("name","id"))
+            if status=="complete" and _is_arc_testnet_chain(chain):
+                tx_hash=_first(record,("txHash","tx_hash","transactionHash","hash"))
+                return normalize_transaction(record,arc_transaction_receipt(tx_hash))
             return normalize_transaction(record)
     raise CircleError("METRON_PAYMENT_NOT_FOUND")
