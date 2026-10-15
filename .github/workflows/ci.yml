@@ -25,7 +25,9 @@ jobs:
       - name: Compile Python and validate manifests
         run: |
           python -m py_compile skills/metron-policy/scripts/*.py
-          python -c 'import json; from pathlib import Path; plugin=json.load(open("plugin.json")); json.load(open(".agents/plugins/marketplace.json")); assert plugin["version"] == "0.2.0"; assert {p.parent.name for p in Path("skills").glob("*/SKILL.md")} == {"metron-policy", "metron-email", "metron-invoice"}'
+          python3 -B skills/metron-policy/tests/test_circle_transactions.py
+          python3 -B skills/metron-policy/tests/test_payment_evidence.py
+          python -c 'import json; from pathlib import Path; plugin=json.load(open("plugin.json")); json.load(open(".agents/plugins/marketplace.json")); assert plugin["version"] == "0.2.0"; assert {p.parent.name for p in Path("skills").glob("*/SKILL.md")} == {"metron-policy", "metron-email", "metron-invoice", "metron-payment"}'
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.2"

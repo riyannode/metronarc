@@ -20,3 +20,5 @@ The reusable template uses `@pdfme/common`, `@pdfme/generator`, and `@pdfme/sche
 Invoices show the persisted customer and billing contact, unique METRON invoice ID, issue and due dates, agreed line items, exact USDC totals, canonical `OPEN / UNPAID` status, Arc Testnet, configured operating-wallet recipient, and the invoice ID as the payment correspondence reference. Tax and fee rows appear only when those values exist in the approved deal terms and reconcile exactly to the persisted invoice amount. Do not imply that the correspondence reference is an on-chain memo or payment reference.
 
 Do not invent the issuer, customer, terms, price, taxes, dates, wallet, or payment outcome. Do not render a draft as an issued invoice. Do not send attachments from this skill; `metron-email` owns the native Gmail action and its durable idempotency state. Do not modify scheduler cadence or create another scheduler.
+
+After customer delivery, use `metron-payment` for Circle settlement verification and invoice reconciliation. A rendered or delivered PDF remains `OPEN`; it is not payment evidence.

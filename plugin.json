@@ -9,14 +9,14 @@
     "com.openai": {
       "interface": {
         "displayName": "METRON",
-        "shortDescription": "Policy, customer email, and invoices",
-        "longDescription": "Use three skills in one plugin: enforce economic limits and accounting, autonomously manage verified customer conversations through host email tools, and generate private professional invoice PDFs from posted METRON records.",
+        "shortDescription": "Policy, email, invoices, and payments",
+        "longDescription": "Use four skills in one plugin: enforce economic limits and accounting, autonomously manage verified customer conversations through host email tools, generate private invoice PDFs from posted METRON records, and verify Circle payment settlement before reconciliation.",
         "developerName": "METRON contributors",
         "category": "Finance",
         "capabilities": ["Read", "Write"],
         "composerIcon": "./assets/metron-mark.svg",
         "logo": "./assets/metron-mark.svg",
-        "defaultPrompt": ["Use METRON policy, customer email, or invoice document operations."]
+        "defaultPrompt": ["Use METRON policy, customer email, invoice documents, or payment verification operations."]
       },
       "review": {
         "commerce": true,

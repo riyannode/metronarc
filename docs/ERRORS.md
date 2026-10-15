@@ -68,7 +68,7 @@ The CLI returns stable codes in `{"ok":false,"error":{"code":...,"message":...}}
 | `METRON_CIRCLE_NOT_INSTALLED` | Circle CLI was not found in PATH. |
 | `METRON_CIRCLE_NOT_AUTHENTICATED` | Circle Agent Wallet needs user login/OTP. |
 | `METRON_CIRCLE_COMMAND_FAILED` | Circle CLI returned failure; inspect the CLI directly without exposing its credentials. |
-| `METRON_CIRCLE_SCHEMA_CHANGED` | Circle output did not match the strict JSON shape METRON accepts. |
+| `METRON_CIRCLE_SCHEMA_CHANGED` | Circle or Arc RPC output did not match the strict transaction/receipt shape METRON accepts. Stop reconciliation and inspect the provider response; do not infer asset, amount, or settlement fields. |
 | `METRON_REGISTRY_ATTRIBUTION_INVALID` | Revenue attribution does not point to an existing, same-goal Spend Intent. |
 | `METRON_REGISTRY_EVIDENCE_INVALID` | Reconciled Circle evidence or its exact amount/address fields do not satisfy registry commitment requirements. |
 | `METRON_REGISTRY_ORIGIN_SPEND_PENDING` | The attributed spend is not yet confirmed on-chain; sync its outbox record before recording revenue. A `PENDING` spend record may make its first submission during sync; a `SUBMITTED` or `UNKNOWN` record permits readback only. |
@@ -83,13 +83,13 @@ The CLI returns stable codes in `{"ok":false,"error":{"code":...,"message":...}}
 | `METRON_REGISTRY_RECONCILIATION_MISMATCH` | On-chain fields conflict with the intended commitment; do not resubmit or alter local business truth. |
 | `METRON_REGISTRY_RECONCILIATION_FAILED` | Registry readback or reconciliation failed; once the provider is available, sync the existing `SUBMITTED` or `UNKNOWN` record for authoritative readback only. |
 | `METRON_CIRCLE_TIMEOUT` | Circle did not return before timeout; payment status may be ambiguous. |
-| `METRON_PAYMENT_AMBIGUOUS` | Preserve `UNKNOWN`; query authoritative Circle transaction history or x402 transfer status before any retry. |
+| `METRON_PAYMENT_AMBIGUOUS` | Preserve `UNKNOWN`; query authoritative Circle and, when required, Arc transaction/receipt evidence before any further action. Never redispatch a payment because a read timed out. |
 | `METRON_PAYMENT_NOT_FOUND` | Provider reference was not found in the authoritative Circle response. |
 | `METRON_GATEWAY_STATUS_UNAVAILABLE` | Circle's x402 transfer status API could not confirm the Gateway payment; preserve `UNKNOWN` and reconcile later. |
 | `METRON_GATEWAY_STATUS_FORBIDDEN` | Circle's x402 transfer API returned HTTP 403; preserve `UNKNOWN` and resolve endpoint access before retrying the read-only lookup. |
 | `METRON_GATEWAY_RESPONSE_TOO_LARGE` | Circle's x402 transfer response exceeded 64 KiB; preserve `UNKNOWN` and inspect the response contract before retrying the read-only lookup. |
-| `METRON_PAYMENT_ALREADY_CONSUMED` | Evidence reference was already linked to an entry. |
-| `METRON_RECONCILIATION_MISMATCH` | State, direction, currency, amount, destination, invoice, or evidence did not match. |
+| `METRON_PAYMENT_ALREADY_CONSUMED` | Provider reference is already linked to another payment entry, evidence row, invoice, or spend; for direct Circle transactions the Arc transaction hash is also single-use. Do not reuse it. |
+| `METRON_RECONCILIATION_MISMATCH` | State, operation, direction, asset, amount, destination, chain, invoice, receipt, or evidence did not match. |
 | `METRON_INVOICE_NOT_OPEN` | Invoice cannot be posted or reconciled in its current state. |
 | `METRON_INVOICE_NOT_FOUND` | The requested invoice ID does not exist. |
 | `METRON_INVOICE_DUE_DATE_REQUIRED` | An approved deal must include an agreed due date before METRON can create or post its invoice. |

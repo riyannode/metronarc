@@ -634,11 +634,20 @@ def record_spend_result(db: sqlite3.Connection, intent_id: str, result: dict, ex
             and is_address(result.get("from_address")) and result["from_address"].lower()==sender.lower()
             and result.get("chain")==config.get("chain","ARC-TESTNET")
         )
+        if valid_identity and result.get("status") in ("confirmed","complete","completed"):
+            consumed=db.execute(
+                "SELECT 1 FROM payment_evidence WHERE provider_ref=? "
+                "OR (evidence_type='CIRCLE_TRANSACTION' AND ? IS NOT NULL AND lower(tx_hash)=lower(?)) "
+                "UNION ALL SELECT 1 FROM payment_entries WHERE provider_payment_id=? "
+                "UNION ALL SELECT 1 FROM spend_intents WHERE provider_payment_id=? AND id<>? LIMIT 1",
+                (ref,result.get("tx_hash"),result.get("tx_hash"),ref,ref,intent_id),
+            ).fetchone()
+            if consumed: raise DomainError("METRON_PAYMENT_ALREADY_CONSUMED")
         if result.get("status")=="failed" and valid_identity:
             db.execute("UPDATE spend_intents SET status='FAILED',provider_payment_id=COALESCE(provider_payment_id,?),executed_at=? WHERE id=?",(ref,timestamp,intent_id))
             store.event(db,"SPEND_FAILED","spend_intent",intent_id,"Circle confirmed the x402 transfer failed",{"provider_ref":ref},timestamp)
             return {"id":intent_id,"status":"FAILED"}
-        if not valid_identity or result.get("status") not in ("confirmed","complete","completed"):
+        if not valid_identity or result.get("status") not in ("confirmed","complete","completed") or result.get("settlement_verified") is not True:
             if valid_identity and not intent["provider_payment_id"]:
                 db.execute("UPDATE spend_intents SET status='UNKNOWN',provider_payment_id=?,executed_at=? WHERE id=?",(ref,timestamp,intent_id))
             else:
@@ -1062,9 +1071,10 @@ def reconcile_invoice(db: sqlite3.Connection, invoice_id: str, evidence: dict) -
         invoice=db.execute("SELECT * FROM sales_invoices WHERE id=?",(invoice_id,)).fetchone()
         if invoice is None: raise DomainError("METRON_INVOICE_NOT_FOUND")
         if invoice["status"] != "OPEN": raise DomainError("METRON_INVOICE_NOT_OPEN")
-        required={"status":"confirmed","direction":"IN","currency":"USDC"}
+        required={"status":"confirmed","direction":"IN","currency":"USDC","provider":"CIRCLE","evidence_type":"CIRCLE_TRANSACTION"}
         for key,value in required.items():
             if str(evidence.get(key,"")).lower() != value.lower(): raise DomainError("METRON_RECONCILIATION_MISMATCH")
+        if evidence.get("settlement_verified") is not True: raise DomainError("METRON_RECONCILIATION_MISMATCH")
         amount=int(evidence.get("amount_atomic",-1))
         config=store.read_config(); wallet=config.get("operating_wallet")
         deal=db.execute("SELECT terms_json FROM deals WHERE id=?",(invoice["deal_id"],)).fetchone()
@@ -1076,7 +1086,12 @@ def reconcile_invoice(db: sqlite3.Connection, invoice_id: str, evidence: dict) -
             raise DomainError("METRON_COUNTERPARTY_UNVERIFIED")
         ref=str(evidence.get("provider_ref", ""))
         if not ref: raise DomainError("METRON_PAYMENT_NOT_FOUND")
-        if db.execute("SELECT 1 FROM payment_evidence WHERE provider_ref=?",(ref,)).fetchone(): raise DomainError("METRON_PAYMENT_ALREADY_CONSUMED")
+        if db.execute(
+            "SELECT 1 FROM payment_evidence WHERE provider_ref=? "
+            "OR (evidence_type='CIRCLE_TRANSACTION' AND ? IS NOT NULL AND lower(tx_hash)=lower(?)) "
+            "UNION ALL SELECT 1 FROM payment_entries WHERE provider_payment_id=? LIMIT 1",
+            (ref,evidence.get("tx_hash"),evidence.get("tx_hash"),ref),
+        ).fetchone(): raise DomainError("METRON_PAYMENT_ALREADY_CONSUMED")
         entry=store.next_id(db,"payment_entries","PE"); ev=store.next_id(db,"payment_evidence","EV")
         db.execute("INSERT INTO payment_entries(id,source_type,source_id,direction,counterparty_id,amount_atomic,currency,provider,provider_payment_id,status,created_at,confirmed_at,reconciled_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",(entry,"SALES_INVOICE",invoice_id,"IN",invoice["counterparty_id"],amount,"USDC",str(evidence.get("provider","CIRCLE")),ref,"RECONCILED",timestamp,timestamp,timestamp))
         db.execute("INSERT INTO payment_evidence(id,payment_entry_id,provider,evidence_type,provider_ref,chain,tx_hash,from_address,to_address,amount_atomic,currency,raw_evidence_hash,observed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",(ev,entry,str(evidence.get("provider","CIRCLE")),"CIRCLE_TRANSACTION",ref,evidence.get("chain"),evidence.get("tx_hash"),evidence.get("from_address"),evidence.get("to_address"),amount,"USDC",raw_hash,timestamp))

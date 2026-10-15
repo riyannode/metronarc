@@ -4,7 +4,7 @@
 
 > An agent should earn the right to spend more capital by proving that previous spending generated revenue.
 
-METRON is one plugin with three skills for Codex and compatible local AI hosts. `metron-policy` owns economic decisions and the finance CLI; `metron-email` autonomously operates customer conversations through the host's connected email and discovery tools; `metron-invoice` renders private PDF documents from persisted posted invoice data. All skills use the same local METRON state. METRON does not bundle an email transport, host an LLM, provide an MCP server, or run a remote backend.
+METRON is one plugin with four skills for Codex and compatible local AI hosts. `metron-policy` owns economic decisions and the finance CLI; `metron-email` autonomously operates customer conversations through the host's connected email and discovery tools; `metron-invoice` renders private PDF documents from persisted posted invoice data; and `metron-payment` guides authoritative Circle payment verification and reconciliation. All skills use the same local METRON state. METRON does not bundle an email transport, host an LLM, provide an MCP server, or run a remote backend.
 
 ```mermaid
 flowchart LR
