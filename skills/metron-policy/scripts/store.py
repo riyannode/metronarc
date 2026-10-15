@@ -187,6 +187,7 @@ CREATE TABLE IF NOT EXISTS email_offers (
 );
 CREATE INDEX IF NOT EXISTS idx_spend_intents_goal_status ON spend_intents(goal_id,status);
 CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_events_type_entity_id ON events(event_type,entity_id);
 CREATE INDEX IF NOT EXISTS idx_email_messages_thread ON email_messages(account_email,gmail_thread_id,received_at);
 CREATE INDEX IF NOT EXISTS idx_email_messages_processing ON email_messages(account_email,status,lease_until);
 CREATE INDEX IF NOT EXISTS idx_email_message_events_pending ON email_message_events(account_email,event_type,status,reported_at);

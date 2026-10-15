@@ -81,11 +81,13 @@ def _service(db: sqlite3.Connection, account: str, service_id: str, *, available
 def _offer_terms(value: object, policy: dict, *, outbound: bool, capacity_limit: int | None = None) -> str:
     encoded = _json_object(value, 4096)
     terms = json.loads(encoded)
-    allowed = {"quantity", "service_scope", "deliverables", "delivery_days"}
+    required = {"quantity", "service_scope", "deliverables", "delivery_days"}
+    allowed = required | {"scope", "subjects", "constraints"}
     if not outbound:
         allowed |= {"requested_unit_price_atomic", "payer_wallet", "custom_or_legal_terms"}
         if set(terms) - allowed:
             raise finance.DomainError("METRON_INVALID_INPUT")
+        finance._validate_customer_scope_terms(terms)
         if "quantity" in terms and (isinstance(terms["quantity"], bool) or not isinstance(terms["quantity"], int) or terms["quantity"] < 1):
             raise finance.DomainError("METRON_INVALID_INPUT")
         if "service_scope" in terms and (not isinstance(terms["service_scope"], str) or len(terms["service_scope"]) > 2048):
@@ -113,8 +115,9 @@ def _offer_terms(value: object, policy: dict, *, outbound: bool, capacity_limit:
             if not isinstance(wallet, str) or len(wallet) != 42 or not wallet.startswith("0x") or any(char not in "0123456789abcdefABCDEF" for char in wallet[2:]):
                 raise finance.DomainError("METRON_INVALID_INPUT")
         return encoded
-    if set(terms) != allowed:
+    if not required.issubset(terms) or set(terms) - allowed:
         raise finance.DomainError("METRON_INVALID_INPUT")
+    finance._validate_customer_scope_terms(terms)
     quantity = terms.get("quantity")
     if (
         isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1
