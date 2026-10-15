@@ -36,6 +36,9 @@ The CLI returns stable codes in `{"ok":false,"error":{"code":...,"message":...}}
 | `METRON_EMAIL_ACCEPTANCE_EVIDENCE_REQUIRED` | An email-bound deal needs verified acceptance evidence before acceptance and final human approval. Reread the original thread and link the structured evidence with `deal-accept`. |
 | `METRON_EMAIL_ACCEPTANCE_EVIDENCE_INVALID` | The linked email acceptance evidence is malformed, stale, duplicated, or inconsistent with the deal terms. Preserve status and events and inspect the ledger. |
 | `METRON_EMAIL_ACCEPTANCE_CONFLICT` | This deal already has different acceptance evidence, or this acceptance Gmail message is linked to another deal. Preserve the existing event and inspect both threads. |
+| `METRON_EMAIL_PAYMENT_TERMS_EVIDENCE_REQUIRED` | An email-bound deal needs a verified customer payment-terms event before approval or invoice creation. Read the original Gmail thread and record its exact buyer-confirmed wallet and due date with a matching confirmation excerpt using `deal-payment-terms-confirm`. |
+| `METRON_EMAIL_PAYMENT_TERMS_EVIDENCE_INVALID` | The stored payment-terms event is missing required fields, its confirmation excerpt does not match its wallet or due date, or it no longer matches the inbound Gmail message, account, customer, thread, conversation, or deal. Preserve the event and stop for operator review. |
+| `METRON_EMAIL_PAYMENT_TERMS_CONFLICT` | The deal already has different buyer-confirmed payment terms, or this account/message pair is linked elsewhere. Preserve existing evidence and investigate before proceeding. |
 | `METRON_EMAIL_BLOCKER_NOT_FOUND` | No blocker exists for the supplied account and blocker ID. |
 | `METRON_EMAIL_BLOCKER_NOT_OPEN` | Only an open blocker can receive a new delivery acknowledgement. |
 | `METRON_EMAIL_BLOCKER_NOT_REPORTED` | Surface the blocker with `blocker-report` before acknowledging delivery. |

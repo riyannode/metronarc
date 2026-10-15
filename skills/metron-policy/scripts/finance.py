@@ -240,6 +240,214 @@ def _acceptance_evidence(
     return payload, False
 
 
+CUSTOMER_PAYMENT_TERMS_EVENT = "CUSTOMER_PAYMENT_TERMS_CONFIRMED"
+CUSTOMER_PAYMENT_TERMS_FIELDS = {
+    "account_email", "customer_email", "conversation_id", "gmail_message_id", "gmail_thread_id",
+    "deal_id", "payer_wallet", "due_at", "buyer_confirmation_excerpt", "confirmation_excerpt_sha256",
+}
+CUSTOMER_PAYMENT_TERMS_INPUT_FIELDS = CUSTOMER_PAYMENT_TERMS_FIELDS - {"deal_id", "confirmation_excerpt_sha256"}
+
+
+def _validate_customer_payment_terms_evidence(
+    db: sqlite3.Connection, deal_id: str, payload: dict, error_code: str,
+) -> dict:
+    if not isinstance(payload, dict) or set(payload) != CUSTOMER_PAYMENT_TERMS_FIELDS or payload.get("deal_id") != deal_id:
+        raise DomainError(error_code)
+    string_fields = CUSTOMER_PAYMENT_TERMS_FIELDS - {"deal_id", "confirmation_excerpt_sha256"}
+    if any(not isinstance(payload.get(key), str) or not payload[key].strip() or len(payload[key]) > 512
+           for key in string_fields - {"buyer_confirmation_excerpt"}):
+        raise DomainError(error_code)
+    excerpt = payload.get("buyer_confirmation_excerpt")
+    if not isinstance(excerpt, str) or not excerpt.strip() or len(excerpt) > 1024:
+        raise DomainError(error_code)
+    wallet = payload["payer_wallet"]
+    if len(wallet) != 42 or not wallet.startswith("0x") or any(char not in "0123456789abcdefABCDEF" for char in wallet[2:]):
+        raise DomainError(error_code)
+    try:
+        due_date = date.fromisoformat(payload["due_at"])
+    except ValueError:
+        raise DomainError(error_code) from None
+    if due_date.isoformat() != payload["due_at"]:
+        raise DomainError(error_code)
+    excerpt_hash = hashlib.sha256(excerpt.encode("utf-8")).hexdigest()
+    if (
+        payload.get("confirmation_excerpt_sha256") != excerpt_hash
+        or wallet.lower() not in excerpt.lower()
+        or payload["due_at"] not in excerpt
+    ):
+        raise DomainError("METRON_EMAIL_PAYMENT_TERMS_EVIDENCE_INVALID")
+
+    row = db.execute(
+        "SELECT d.terms_json,d.commercial_service_id,c.external_ref FROM deals d "
+        "JOIN counterparties c ON c.id=d.counterparty_id WHERE d.id=?", (deal_id,),
+    ).fetchone()
+    if row is None:
+        raise DomainError("METRON_DEAL_NOT_FOUND")
+    try:
+        terms = json.loads(row["terms_json"])
+    except (TypeError, json.JSONDecodeError):
+        raise DomainError(error_code) from None
+    if not isinstance(terms, dict):
+        raise DomainError(error_code)
+    service = terms.get("commercial_service")
+    conversation_id = terms.get("email_conversation_id")
+    if (
+        not isinstance(service, dict) or not isinstance(conversation_id, str)
+        or service.get("service_id") != row["commercial_service_id"]
+        or str(service.get("account_email") or "").strip().lower() != payload["account_email"].strip().lower()
+        or conversation_id != payload["conversation_id"]
+    ):
+        raise DomainError(error_code)
+    account = payload["account_email"].strip().lower()
+    customer = payload["customer_email"].strip().lower()
+    conversation = db.execute(
+        "SELECT account_email,customer_email,gmail_thread_id,commercial_service_id,deal_id "
+        "FROM email_conversations WHERE id=?", (conversation_id,),
+    ).fetchone()
+    if (
+        conversation is None or conversation["account_email"] != account
+        or conversation["customer_email"].strip().lower() != customer
+        or conversation["gmail_thread_id"] != payload["gmail_thread_id"]
+        or conversation["commercial_service_id"] != row["commercial_service_id"]
+        or conversation["deal_id"] != deal_id
+        or not isinstance(row["external_ref"], str) or row["external_ref"].strip().lower() != customer
+    ):
+        raise DomainError(error_code)
+    message = db.execute(
+        "SELECT gmail_thread_id,conversation_id,direction FROM email_messages "
+        "WHERE account_email=? AND gmail_message_id=?", (account, payload["gmail_message_id"]),
+    ).fetchone()
+    if (
+        message is None or message["direction"] != "INBOUND"
+        or message["conversation_id"] != conversation_id
+        or message["gmail_thread_id"] != payload["gmail_thread_id"]
+    ):
+        raise DomainError(error_code)
+    return payload
+
+
+def _customer_payment_terms_evidence(db: sqlite3.Connection, deal_id: str) -> dict:
+    rows = db.execute(
+        "SELECT data_json FROM events WHERE event_type=? AND entity_type='deal' AND entity_id=?",
+        (CUSTOMER_PAYMENT_TERMS_EVENT, deal_id),
+    ).fetchall()
+    if not rows:
+        raise DomainError("METRON_EMAIL_PAYMENT_TERMS_EVIDENCE_REQUIRED")
+    if len(rows) != 1:
+        raise DomainError("METRON_EMAIL_PAYMENT_TERMS_EVIDENCE_INVALID")
+    try:
+        payload = json.loads(rows[0]["data_json"])
+    except (TypeError, json.JSONDecodeError):
+        raise DomainError("METRON_EMAIL_PAYMENT_TERMS_EVIDENCE_INVALID") from None
+    return _validate_customer_payment_terms_evidence(
+        db, deal_id, payload, "METRON_EMAIL_PAYMENT_TERMS_EVIDENCE_INVALID"
+    )
+
+
+def confirm_customer_payment_terms(db: sqlite3.Connection, deal_id: str, evidence: dict) -> dict:
+    timestamp = now()
+    if not isinstance(evidence, dict) or set(evidence) != CUSTOMER_PAYMENT_TERMS_INPUT_FIELDS:
+        raise DomainError("METRON_INVALID_INPUT")
+    account = evidence.get("account_email")
+    customer = evidence.get("customer_email")
+    conversation_id = evidence.get("conversation_id")
+    gmail_message_id = evidence.get("gmail_message_id")
+    gmail_thread_id = evidence.get("gmail_thread_id")
+    if any(not isinstance(value, str) or not value.strip() or len(value) > 512 for value in
+           (account, customer, conversation_id, gmail_message_id, gmail_thread_id)):
+        raise DomainError("METRON_INVALID_INPUT")
+    wallet = evidence.get("payer_wallet")
+    due_at = evidence.get("due_at")
+    if not isinstance(wallet, str) or len(wallet) != 42 or not wallet.startswith("0x") or any(
+        char not in "0123456789abcdefABCDEF" for char in wallet[2:]
+    ):
+        raise DomainError("METRON_INVALID_INPUT")
+    if not isinstance(due_at, str) or not due_at.strip():
+        raise DomainError("METRON_INVALID_INPUT")
+    try:
+        due_date = date.fromisoformat(due_at)
+    except ValueError:
+        raise DomainError("METRON_INVALID_INPUT") from None
+    if due_date.isoformat() != due_at:
+        raise DomainError("METRON_INVALID_INPUT")
+    excerpt = evidence.get("buyer_confirmation_excerpt")
+    if not isinstance(excerpt, str) or not excerpt.strip() or len(excerpt) > 1024:
+        raise DomainError("METRON_INVALID_INPUT")
+    excerpt = excerpt.strip()
+
+    with store.transaction(db):
+        row = db.execute(
+            "SELECT d.*,c.external_ref FROM deals d JOIN counterparties c ON c.id=d.counterparty_id WHERE d.id=?",
+            (deal_id,),
+        ).fetchone()
+        if row is None:
+            raise DomainError("METRON_DEAL_NOT_FOUND")
+        if row["status"] != "PENDING_HUMAN":
+            raise DomainError("METRON_HUMAN_APPROVAL_REQUIRED")
+        try:
+            terms = json.loads(row["terms_json"])
+        except (TypeError, json.JSONDecodeError):
+            raise DomainError("METRON_EMAIL_PAYMENT_TERMS_EVIDENCE_INVALID") from None
+        if not isinstance(terms, dict):
+            raise DomainError("METRON_EMAIL_PAYMENT_TERMS_EVIDENCE_INVALID")
+        verified_conversation_id = _verify_commercial_service_terms(
+            db, row["amount_atomic"], terms, row["external_ref"], deal_id, row["commercial_service_id"]
+        )
+        if verified_conversation_id is None:
+            raise DomainError("METRON_EMAIL_PAYMENT_TERMS_EVIDENCE_INVALID")
+        payload = {
+            "account_email": account.strip().lower(),
+            "customer_email": customer.strip().lower(),
+            "conversation_id": conversation_id,
+            "gmail_message_id": gmail_message_id.strip(),
+            "gmail_thread_id": gmail_thread_id,
+            "deal_id": deal_id,
+            "payer_wallet": wallet,
+            "due_at": due_at,
+            "buyer_confirmation_excerpt": excerpt,
+            "confirmation_excerpt_sha256": hashlib.sha256(excerpt.encode("utf-8")).hexdigest(),
+        }
+        _validate_customer_payment_terms_evidence(
+            db, deal_id, payload, "METRON_EMAIL_IDENTITY_MISMATCH"
+        )
+        rows = db.execute(
+            "SELECT data_json FROM events WHERE event_type=? AND entity_type='deal' AND entity_id=?",
+            (CUSTOMER_PAYMENT_TERMS_EVENT, deal_id),
+        ).fetchall()
+        if len(rows) > 1:
+            raise DomainError("METRON_EMAIL_PAYMENT_TERMS_EVIDENCE_INVALID")
+        if rows:
+            try:
+                prior = json.loads(rows[0]["data_json"])
+            except (TypeError, json.JSONDecodeError):
+                raise DomainError("METRON_EMAIL_PAYMENT_TERMS_EVIDENCE_INVALID") from None
+            _validate_customer_payment_terms_evidence(
+                db, deal_id, prior, "METRON_EMAIL_PAYMENT_TERMS_EVIDENCE_INVALID"
+            )
+            if prior == payload:
+                return {"id": deal_id, "status": "PENDING_HUMAN", "evidence_status": "EXISTS"}
+            raise DomainError("METRON_EMAIL_PAYMENT_TERMS_CONFLICT")
+        candidates = db.execute(
+            "SELECT entity_id,data_json FROM events WHERE event_type=? AND entity_type='deal' "
+            "AND instr(data_json,?)>0 AND instr(data_json,?)>0",
+            (CUSTOMER_PAYMENT_TERMS_EVENT, json.dumps(payload["account_email"]),
+             json.dumps(payload["gmail_message_id"])),
+        ).fetchall()
+        for candidate in candidates:
+            try:
+                prior = json.loads(candidate["data_json"])
+            except (TypeError, json.JSONDecodeError):
+                raise DomainError("METRON_EMAIL_PAYMENT_TERMS_EVIDENCE_INVALID") from None
+            if (
+                isinstance(prior, dict) and prior.get("account_email") == payload["account_email"]
+                and prior.get("gmail_message_id") == payload["gmail_message_id"]
+            ):
+                raise DomainError("METRON_EMAIL_PAYMENT_TERMS_CONFLICT")
+        store.event(db, CUSTOMER_PAYMENT_TERMS_EVENT, "deal", deal_id,
+                    "Customer-confirmed payment terms recorded", payload, timestamp)
+    return {"id": deal_id, "status": "PENDING_HUMAN", "evidence_status": "RECORDED"}
+
+
 def create_goal(db: sqlite3.Connection, data: dict) -> dict:
     timestamp = now()
     target = atomic(data.get("revenue_target"))
@@ -732,9 +940,16 @@ def approve_deal(db: sqlite3.Connection, deal_id: str, approved: bool, payer_wal
                 )
                 if not duplicate or validated_evidence["terms_sha256_after"] != stored_terms_hash:
                     raise DomainError("METRON_EMAIL_ACCEPTANCE_EVIDENCE_INVALID")
+                payment_terms_evidence = _customer_payment_terms_evidence(db, deal_id)
+            else:
+                payment_terms_evidence = None
             payer=payer_wallet or terms.get("payer_wallet")
             if not isinstance(payer,str) or len(payer)!=42 or not payer.startswith("0x") or any(ch not in "0123456789abcdefABCDEF" for ch in payer[2:]):
                 raise DomainError("METRON_COUNTERPARTY_UNVERIFIED")
+            if email_bound:
+                if payer.lower() != payment_terms_evidence["payer_wallet"].lower():
+                    raise DomainError("METRON_COUNTERPARTY_UNVERIFIED")
+                payer = payment_terms_evidence["payer_wallet"]
             terms["payer_wallet"]=payer
         db.execute("UPDATE deals SET status=?,approved_at=?,terms_json=? WHERE id=?",(status,timestamp,json.dumps(terms,sort_keys=True),deal_id))
         store.event(db,status,"deal",deal_id,"Human decision recorded",{},timestamp)
@@ -750,7 +965,25 @@ def create_invoice(db: sqlite3.Connection, deal_id: str, due_at: str | None) -> 
             return {"id":existing["id"],"status":existing["status"],"existing":True}
         if deal["status"] != "HUMAN_APPROVED": raise DomainError("METRON_HUMAN_APPROVAL_REQUIRED")
         terms=json.loads(deal["terms_json"])
-        agreed_due_at=terms.get("due_at")
+        linked_conversation = db.execute(
+            "SELECT 1 FROM email_conversations WHERE deal_id=? LIMIT 1", (deal_id,)
+        ).fetchone()
+        acceptance_event = db.execute(
+            "SELECT 1 FROM events WHERE event_type='CUSTOMER_ACCEPTANCE_EVIDENCE_LINKED' "
+            "AND entity_type='deal' AND entity_id=? LIMIT 1", (deal_id,),
+        ).fetchone()
+        email_bound = (
+            deal["commercial_service_id"] is not None
+            or terms.get("commercial_service") is not None
+            or terms.get("email_conversation_id") is not None
+            or linked_conversation is not None
+            or acceptance_event is not None
+        )
+        if email_bound:
+            payment_terms_evidence = _customer_payment_terms_evidence(db, deal_id)
+            agreed_due_at = payment_terms_evidence["due_at"]
+        else:
+            agreed_due_at = terms.get("due_at")
         if due_at is not None and due_at != agreed_due_at: raise DomainError("METRON_INVALID_INPUT")
         due_at=agreed_due_at
         if not isinstance(due_at,str) or not due_at.strip():
