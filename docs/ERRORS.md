@@ -48,6 +48,7 @@ The CLI returns stable codes in `{"ok":false,"error":{"code":...,"message":...}}
 | `METRON_EMAIL_SEND_UNRESOLVED` | A send is prepared, submitting, or ambiguous. Read the existing thread and do not send again until authoritative connector evidence resolves it. |
 | `METRON_EMAIL_SEND_AMBIGUOUS` | The connector may have accepted the message but did not return a definitive result. Preserve `UNKNOWN` and inspect the existing Gmail thread; never resend. |
 | `METRON_EMAIL_SEND_FAILED` | The connector definitively confirmed it did not send. Preserve the failed action and investigate before preparing a new communication. |
+| `METRON_EMAIL_DELIVERABLE_NOT_ELIGIBLE` | The customer deliverable is not bound to a matching closed-won email deal and saved conversation. Verify the deal terms and source Gmail thread; do not change the deal to permit delivery. |
 | `METRON_EMAIL_PROCESSING_FAILED` | Message processing stopped. Inspect the saved state and connector response before reclaiming it. |
 | `METRON_CIRCLE_TERMS_CONSENT_REQUIRED` | Circle Terms were not accepted by the user. Show the current Terms and Privacy Policy links and continue only after explicit consent. |
 | `METRON_CIRCLE_TERMS_ACCEPTANCE_FAILED` | Circle did not report the current Terms as accepted after the user-approved acceptance command. Do not retry automatically. |

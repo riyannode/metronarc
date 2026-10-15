@@ -10,6 +10,8 @@
 
 ### Current manual path
 
+The repository is currently private, so only GitHub accounts with existing access can add this marketplace. Public installation by a new user requires a separately authorized repository visibility change.
+
 1. In ChatGPT desktop, open Plugins and choose Add marketplace from a repository.
 2. Enter `https://github.com/riyannode/metronarc` and select ref `master`.
 3. Select the METRON marketplace and install/enable METRON.
@@ -27,7 +29,7 @@ After installing the plugin:
 
 EconomicRegistry is METRON's shared non-custodial provenance contract on Arc Testnet at `0x547552585d8d995c5063820b2950e0db52b4cab4` (chain ID `5042002`). Users do not deploy or fund it. Configure and fund only the Circle operating wallet for normal payment operations. Configure each offered service through `metron-email`'s `service-set` agent operation; each service stores its own scope, deliverables, prices, capacity, timeline, and active status.
 
-The repository marketplace installs one plugin containing the discoverable `metron-policy`, `metron-email`, and `metron-invoice` skills. The repository marketplace uses the current portable root `plugin.json` format. Marketplace visibility and installation must be verified in the actual target client; parsing manifests alone is not installation verification.
+The repository marketplace installs one plugin containing four discoverable skills: `metron-policy`, `metron-email`, `metron-invoice`, and `metron-payment`. The repository marketplace uses the current portable root `plugin.json` format and plugin version `0.2.0`. Marketplace visibility and installation must be verified in the actual target client; parsing manifests alone is not installation verification.
 
 ## Circle setup
 
@@ -39,4 +41,6 @@ The owner uses Circle's documented Agent Wallet email OTP flow; never put the OT
 
 Default files live in `~/.metron/`: `metron.sqlite`, `config.json`, and generated `dashboard.html`. `METRON_HOME` may point to a private alternate local directory for isolated manual verification. Never point it at the repository.
 
-The email skill stores message/thread IDs, account-wide recipient suppressions, a configurable outbound limit, conversation metadata, send-attempt states, and follow-up times in additive `email_*` tables in that same SQLite database. `email-state` refuses to create a missing or invalid ledger; initialize METRON first. It does not create a second database. Email uses the host's connected tools, and the scheduler frequency remains user-configured in the host and is independent of the default 10-message rolling 24-hour send limit.
+The email skill stores message/thread IDs, account-wide recipient suppressions, a configurable outbound limit, conversation metadata, send-attempt states, and follow-up times in additive `email_*` tables in that same SQLite database. `email-state` refuses to create a missing or invalid ledger; initialize METRON first. It does not create a second database. Email uses the host's connected tools, and the scheduler frequency remains user-configured in the host and is independent of the default 10-message rolling 24-hour send limit. Keep the existing `~/.metron/metron.sqlite`; never initialize a replacement ledger to test installation.
+
+For a fresh-session recovery check, open a new Codex chat with the installed plugin enabled, confirm the plugin version and all four skills, then use read-only METRON status and email-state queries to confirm the existing ledger is visible. Do not call `init` when the user's ledger already exists. A fresh shell or Python subprocess alone does not establish plugin/session recovery.

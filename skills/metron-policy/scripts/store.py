@@ -145,13 +145,15 @@ CREATE TABLE IF NOT EXISTS email_message_events (
 );
 CREATE TABLE IF NOT EXISTS email_send_attempts (
   id TEXT PRIMARY KEY, account_email TEXT NOT NULL, action_key TEXT NOT NULL,
-  conversation_id TEXT NOT NULL REFERENCES email_conversations(id), action_kind TEXT NOT NULL CHECK (action_kind IN ('OUTREACH','REPLY','FOLLOW_UP','INVOICE')),
+  conversation_id TEXT NOT NULL REFERENCES email_conversations(id), action_kind TEXT NOT NULL CHECK (action_kind IN ('OUTREACH','REPLY','FOLLOW_UP','INVOICE','DELIVERABLE')),
   invoice_id TEXT REFERENCES sales_invoices(id),
   source_message_id TEXT, recipient_email TEXT NOT NULL, content_sha256 TEXT NOT NULL CHECK (length(content_sha256)=64),
   status TEXT NOT NULL CHECK (status IN ('PREPARED','SUBMITTING','CONFIRMED','UNKNOWN','FAILED')),
   gmail_message_id TEXT, gmail_thread_id TEXT, error_code TEXT,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL, confirmed_at TEXT,
-  CHECK ((action_kind='INVOICE' AND invoice_id IS NOT NULL AND source_message_id IS NULL) OR (action_kind!='INVOICE' AND invoice_id IS NULL)),
+  CHECK ((action_kind='INVOICE' AND invoice_id IS NOT NULL AND source_message_id IS NULL) OR
+         (action_kind='DELIVERABLE' AND invoice_id IS NULL AND source_message_id IS NOT NULL) OR
+         (action_kind NOT IN ('INVOICE','DELIVERABLE') AND invoice_id IS NULL)),
   UNIQUE(account_email,action_key), UNIQUE(account_email,gmail_message_id)
 );
 CREATE TABLE IF NOT EXISTS email_run_locks (
@@ -198,19 +200,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_email_one_reply_per_message
   ON email_send_attempts(account_email,source_message_id) WHERE action_kind='REPLY';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_email_one_followup_per_message
   ON email_send_attempts(account_email,source_message_id) WHERE action_kind='FOLLOW_UP';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_email_one_deliverable_per_deal
+  ON email_send_attempts(action_key) WHERE action_kind='DELIVERABLE';
 """
 
 EMAIL_SEND_ATTEMPTS_SQL = """
 CREATE TABLE email_send_attempts (
   id TEXT PRIMARY KEY, account_email TEXT NOT NULL, action_key TEXT NOT NULL,
   conversation_id TEXT NOT NULL REFERENCES email_conversations(id),
-  action_kind TEXT NOT NULL CHECK (action_kind IN ('OUTREACH','REPLY','FOLLOW_UP','INVOICE')),
+  action_kind TEXT NOT NULL CHECK (action_kind IN ('OUTREACH','REPLY','FOLLOW_UP','INVOICE','DELIVERABLE')),
   invoice_id TEXT REFERENCES sales_invoices(id), source_message_id TEXT, recipient_email TEXT NOT NULL,
   content_sha256 TEXT NOT NULL CHECK (length(content_sha256)=64),
   status TEXT NOT NULL CHECK (status IN ('PREPARED','SUBMITTING','CONFIRMED','UNKNOWN','FAILED')),
   gmail_message_id TEXT, gmail_thread_id TEXT, error_code TEXT,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL, confirmed_at TEXT,
-  CHECK ((action_kind='INVOICE' AND invoice_id IS NOT NULL AND source_message_id IS NULL) OR (action_kind!='INVOICE' AND invoice_id IS NULL)),
+  CHECK ((action_kind='INVOICE' AND invoice_id IS NOT NULL AND source_message_id IS NULL) OR
+         (action_kind='DELIVERABLE' AND invoice_id IS NULL AND source_message_id IS NOT NULL) OR
+         (action_kind NOT IN ('INVOICE','DELIVERABLE') AND invoice_id IS NULL)),
   UNIQUE(account_email,action_key), UNIQUE(account_email,gmail_message_id)
 )
 """
@@ -352,16 +358,20 @@ def _migrate_commercial_deals(db: sqlite3.Connection) -> None:
 
 def _migrate_email_send_attempts(db: sqlite3.Connection) -> None:
     columns = {row[1] for row in db.execute("PRAGMA table_info(email_send_attempts)")}
-    if "invoice_id" in columns:
+    table_sql = db.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='email_send_attempts'"
+    ).fetchone()[0]
+    if "invoice_id" in columns and "DELIVERABLE" in table_sql:
         return
     with transaction(db):
         db.execute("ALTER TABLE email_send_attempts RENAME TO email_send_attempts_before_invoice")
         db.execute(EMAIL_SEND_ATTEMPTS_SQL)
+        invoice_id = "invoice_id" if "invoice_id" in columns else "NULL"
         db.execute(
             "INSERT INTO email_send_attempts "
-            "(id,account_email,action_key,conversation_id,action_kind,source_message_id,recipient_email,content_sha256,status,"
+            "(id,account_email,action_key,conversation_id,action_kind,invoice_id,source_message_id,recipient_email,content_sha256,status,"
             "gmail_message_id,gmail_thread_id,error_code,created_at,updated_at,confirmed_at) "
-            "SELECT id,account_email,action_key,conversation_id,action_kind,source_message_id,recipient_email,content_sha256,status,"
+            f"SELECT id,account_email,action_key,conversation_id,action_kind,{invoice_id},source_message_id,recipient_email,content_sha256,status,"
             "gmail_message_id,gmail_thread_id,error_code,created_at,updated_at,confirmed_at "
             "FROM email_send_attempts_before_invoice"
         )
@@ -382,6 +392,10 @@ def _migrate_email_send_attempts(db: sqlite3.Connection) -> None:
         db.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_email_one_invoice_per_invoice "
             "ON email_send_attempts(invoice_id) WHERE action_kind='INVOICE'"
+        )
+        db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_email_one_deliverable_per_deal "
+            "ON email_send_attempts(action_key) WHERE action_kind='DELIVERABLE'"
         )
 
 
