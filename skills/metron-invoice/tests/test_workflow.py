@@ -700,6 +700,141 @@ class InvoiceWorkflowTest(unittest.TestCase):
                                          data=dict(fixture["evidence"], accepted_offer_gmail_message_id="unknown-offer")),
                          "METRON_EMAIL_OFFER_MISMATCH")
 
+    def test_email_deal_approval_requires_linked_acceptance_evidence(self) -> None:
+        fixture = self.email_acceptance_fixture("approval-missing-evidence")
+        self.call("deal-accept", identifier=fixture["deal"]["id"], data=fixture["evidence"])
+        database = self.home / "metron.sqlite"
+        with sqlite3.connect(database) as db:
+            db.execute("DELETE FROM events WHERE event_type='CUSTOMER_ACCEPTANCE_EVIDENCE_LINKED' AND entity_id=?",
+                       (fixture["deal"]["id"],))
+            before = db.execute("SELECT status,approved_at,terms_json FROM deals WHERE id=?",
+                                (fixture["deal"]["id"],)).fetchone()
+
+        error = self.call_error("deal-approve", identifier=fixture["deal"]["id"],
+                                data={"payer_wallet": WALLET})
+
+        with sqlite3.connect(database) as db:
+            after = db.execute("SELECT status,approved_at,terms_json FROM deals WHERE id=?",
+                               (fixture["deal"]["id"],)).fetchone()
+            approved_events = db.execute("SELECT COUNT(*) FROM events WHERE event_type='HUMAN_APPROVED' AND entity_id=?",
+                                         (fixture["deal"]["id"],)).fetchone()[0]
+            accepted_events = db.execute("SELECT COUNT(*) FROM events WHERE event_type='CUSTOMER_ACCEPTED' AND entity_id=?",
+                                         (fixture["deal"]["id"],)).fetchone()[0]
+
+        self.assertEqual(error, "METRON_EMAIL_ACCEPTANCE_EVIDENCE_REQUIRED")
+        self.assertEqual(after, before)
+        self.assertEqual(approved_events, 0)
+        self.assertEqual(accepted_events, 1)
+
+    def test_email_deal_approval_revalidates_linked_evidence_and_terms(self) -> None:
+        corruptions = ("account", "conversation", "customer", "acceptance_message", "event_thread",
+                       "accepted_terms", "offer_link", "inbound_thread", "offer", "send_attempt", "terms",
+                       "terms_hash", "duplicate_event", "invalid_event", "service")
+        for corruption in corruptions:
+            with self.subTest(corruption=corruption):
+                fixture = self.email_acceptance_fixture(f"approval-revalidation-{corruption}")
+                deal_id = fixture["deal"]["id"]
+                self.call("deal-accept", identifier=deal_id, data=fixture["evidence"])
+                database = self.home / "metron.sqlite"
+                with sqlite3.connect(database) as db:
+                    event = db.execute("SELECT id,data_json FROM events "
+                                       "WHERE event_type='CUSTOMER_ACCEPTANCE_EVIDENCE_LINKED' AND entity_id=?",
+                                       (deal_id,)).fetchone()
+                    payload = json.loads(event[1])
+                    if corruption in {"account", "conversation", "customer", "acceptance_message", "event_thread"}:
+                        key = {"account": "account_email", "conversation": "conversation_id",
+                               "customer": "customer_email",
+                               "acceptance_message": "acceptance_gmail_message_id",
+                               "event_thread": "gmail_thread_id"}[corruption]
+                        payload[key] = "mismatched-evidence"
+                        db.execute("UPDATE events SET data_json=? WHERE id=?", (json.dumps(payload), event[0]))
+                    elif corruption == "accepted_terms":
+                        payload["accepted_terms"]["scope"] = "Unsupported scope"
+                        db.execute("UPDATE events SET data_json=? WHERE id=?", (json.dumps(payload), event[0]))
+                    elif corruption == "offer_link":
+                        payload["accepted_offer_gmail_message_id"] = "unknown-offer"
+                        db.execute("UPDATE events SET data_json=? WHERE id=?", (json.dumps(payload), event[0]))
+                    elif corruption == "inbound_thread":
+                        db.execute("UPDATE email_messages SET gmail_thread_id='different-thread' "
+                                   "WHERE account_email=? AND gmail_message_id=?",
+                                   (fixture["account"], fixture["acceptance_message_id"]))
+                    elif corruption == "offer":
+                        db.execute("UPDATE email_offers SET status='UNKNOWN' "
+                                   "WHERE account_email=? AND gmail_message_id=?",
+                                   (fixture["account"], fixture["offer_message_id"]))
+                    elif corruption == "send_attempt":
+                        action_key = db.execute("SELECT action_key FROM email_offers "
+                                                "WHERE account_email=? AND gmail_message_id=?",
+                                                (fixture["account"], fixture["offer_message_id"])).fetchone()[0]
+                        db.execute("UPDATE email_send_attempts SET status='UNKNOWN' "
+                                   "WHERE account_email=? AND action_key=?",
+                                   (fixture["account"], action_key))
+                    elif corruption == "terms":
+                        terms = json.loads(db.execute("SELECT terms_json FROM deals WHERE id=?", (deal_id,)).fetchone()[0])
+                        terms["scope"] = "Changed after customer acceptance"
+                        db.execute("UPDATE deals SET terms_json=? WHERE id=?", (json.dumps(terms), deal_id))
+                    elif corruption == "terms_hash":
+                        payload["terms_sha256_after"] = "0" * 64
+                        db.execute("UPDATE events SET data_json=? WHERE id=?", (json.dumps(payload), event[0]))
+                    elif corruption == "duplicate_event":
+                        db.execute("INSERT INTO events(event_type,entity_type,entity_id,summary,data_json,created_at) "
+                                   "SELECT event_type,entity_type,entity_id,summary,data_json,created_at FROM events WHERE id=?",
+                                   (event[0],))
+                    elif corruption == "invalid_event":
+                        db.execute("UPDATE events SET data_json='not-json' WHERE id=?", (event[0],))
+                    before = db.execute("SELECT status,approved_at,terms_json FROM deals WHERE id=?", (deal_id,)).fetchone()
+
+                if corruption == "service":
+                    self.set_service_policy(fixture["account"], fixture["owner"],
+                                            service_id=fixture["service"]["service_id"],
+                                            service_scope="Changed service policy")
+                    expected_error = "METRON_EMAIL_SERVICE_POLICY_STALE"
+                elif corruption in {"account", "conversation", "customer", "acceptance_message", "inbound_thread"}:
+                    expected_error = "METRON_EMAIL_IDENTITY_MISMATCH"
+                elif corruption == "event_thread":
+                    expected_error = "METRON_EMAIL_ACCEPTANCE_CONFLICT"
+                elif corruption in {"offer", "send_attempt"}:
+                    expected_error = "METRON_EMAIL_OFFER_MISMATCH"
+                elif corruption in {"accepted_terms", "offer_link"}:
+                    expected_error = "METRON_EMAIL_OFFER_MISMATCH"
+                else:
+                    expected_error = "METRON_EMAIL_ACCEPTANCE_EVIDENCE_INVALID"
+                error = self.call_error("deal-approve", identifier=deal_id, data={"payer_wallet": WALLET})
+
+                with sqlite3.connect(database) as db:
+                    after = db.execute("SELECT status,approved_at,terms_json FROM deals WHERE id=?", (deal_id,)).fetchone()
+                    approved_events = db.execute("SELECT COUNT(*) FROM events "
+                                                 "WHERE event_type='HUMAN_APPROVED' AND entity_id=?",
+                                                 (deal_id,)).fetchone()[0]
+
+                self.assertEqual(error, expected_error)
+                self.assertEqual(after, before)
+                self.assertEqual(approved_events, 0)
+
+    def test_email_deal_rejection_does_not_require_acceptance_evidence(self) -> None:
+        fixture = self.email_acceptance_fixture("rejection-without-evidence")
+        self.call("deal-accept", identifier=fixture["deal"]["id"], data=fixture["evidence"])
+        with sqlite3.connect(self.home / "metron.sqlite") as db:
+            db.execute("DELETE FROM events WHERE event_type='CUSTOMER_ACCEPTANCE_EVIDENCE_LINKED' AND entity_id=?",
+                       (fixture["deal"]["id"],))
+
+        rejected = self.call("deal-reject", identifier=fixture["deal"]["id"])
+
+        self.assertEqual(rejected["status"], "HUMAN_REJECTED")
+
+    def test_unmatched_acceptance_event_cannot_turn_non_email_deal_into_approval(self) -> None:
+        with sqlite3.connect(self.home / "metron.sqlite") as db:
+            db.execute("INSERT INTO events(event_type,entity_type,entity_id,summary,data_json,created_at) "
+                       "VALUES ('CUSTOMER_ACCEPTANCE_EVIDENCE_LINKED','deal',?,'unmatched evidence','{}','2026-10-15')",
+                       (self.deal_id,))
+
+        error = self.call_error("deal-approve", identifier=self.deal_id, data={"payer_wallet": WALLET})
+        deal = self.call("deal-get", identifier=self.deal_id)
+
+        self.assertEqual(error, "METRON_EMAIL_SERVICE_POLICY_STALE")
+        self.assertEqual(deal["status"], "PENDING_HUMAN")
+        self.assertIsNone(deal["approved_at"])
+
     def test_new_acceptance_terms_must_be_supported_by_confirmed_offer(self) -> None:
         fixture = self.email_acceptance_fixture("unsupported-acceptance-term")
         database = self.home / "metron.sqlite"
@@ -858,6 +993,8 @@ class InvoiceWorkflowTest(unittest.TestCase):
         self.assertEqual(persisted_evidence["accepted_terms"], fixture["evidence"]["accepted_terms"])
         self.assertNotEqual(persisted_evidence["terms_sha256_before"], persisted_evidence["terms_sha256_after"])
         self.assertEqual(after_event, old_event)
+        approved = self.call("deal-approve", identifier=fixture["deal"]["id"], data={"payer_wallet": WALLET})
+        self.assertEqual(approved["status"], "HUMAN_APPROVED")
 
     def test_customer_terms_flow_from_offer_through_approval_and_invoice_document(self) -> None:
         for key, value in (("scope", ["not-a-string"]), ("subjects", "not-an-array"),
