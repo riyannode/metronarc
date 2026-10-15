@@ -24,13 +24,13 @@ EVM_TX_HASH = re.compile(r"0x[0-9a-fA-F]{64}\Z")
 DASHBOARD_REFRESH_OPERATIONS = frozenset({
     "goal-create", "spend-propose", "spend-approve", "spend-execute", "payment-reconcile",
     "deal-create", "deal-update", "deal-accept", "deal-approve", "deal-reject",
-    "invoice-create", "invoice-post", "registry-sync", "registry-recover-spend",
+    "deal-payment-terms-confirm", "invoice-create", "invoice-post", "registry-sync", "registry-recover-spend",
 })
 
 
 def parser() -> argparse.ArgumentParser:
     result=argparse.ArgumentParser(description="METRON local economic control and ledger")
-    result.add_argument("operation",nargs="?",choices=("init","status","config-set","contract-address","goal-create","goal-get","spend-propose","spend-approve","spend-estimate","spend-execute","service-search","service-inspect","circle-terms-status","circle-terms-accept","preflight","wallet-list","wallet-balance","deal-create","deal-get","deal-update","deal-accept","deal-approve","deal-reject","invoice-create","invoice-post","invoice-get","payment-sync","payment-reconcile","registry-sync","registry-recover-spend","journal-list","payment-list","events","dashboard","email-state"))
+    result.add_argument("operation",nargs="?",choices=("init","status","config-set","contract-address","goal-create","goal-get","spend-propose","spend-approve","spend-estimate","spend-execute","service-search","service-inspect","circle-terms-status","circle-terms-accept","preflight","wallet-list","wallet-balance","deal-create","deal-get","deal-update","deal-accept","deal-approve","deal-reject","deal-payment-terms-confirm","invoice-create","invoice-post","invoice-get","payment-sync","payment-reconcile","registry-sync","registry-recover-spend","journal-list","payment-list","events","dashboard","email-state"))
     result.add_argument("--input",help="Path to a JSON input document")
     result.add_argument("--id",help="METRON entity ID")
     result.add_argument("--provider-ref",help="Circle transaction ID or hash for payment reconciliation")
@@ -384,6 +384,7 @@ def execute(args: argparse.Namespace) -> object:
         if operation=="deal-update": return finance.update_deal(db,args.id or "",args.entity_status or "")
         if operation=="deal-accept": return finance.accept_deal(db,args.id or "",data or None)
         if operation in {"deal-approve","deal-reject"}: return finance.approve_deal(db,args.id or "",operation=="deal-approve",data.get("payer_wallet"))
+        if operation=="deal-payment-terms-confirm": return finance.confirm_customer_payment_terms(db,args.id or "",data)
         if operation=="invoice-create": return finance.create_invoice(db,args.id or "",data.get("due_at"))
         if operation=="invoice-post": return finance.post_invoice(db,args.id or "")
         if operation=="invoice-get":

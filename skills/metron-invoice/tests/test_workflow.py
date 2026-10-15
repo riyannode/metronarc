@@ -993,6 +993,8 @@ class InvoiceWorkflowTest(unittest.TestCase):
         self.assertEqual(persisted_evidence["accepted_terms"], fixture["evidence"]["accepted_terms"])
         self.assertNotEqual(persisted_evidence["terms_sha256_before"], persisted_evidence["terms_sha256_after"])
         self.assertEqual(after_event, old_event)
+        payment_terms = self.confirm_customer_payment_terms(fixture)
+        self.call("deal-payment-terms-confirm", identifier=fixture["deal"]["id"], data=payment_terms)
         approved = self.call("deal-approve", identifier=fixture["deal"]["id"], data={"payer_wallet": WALLET})
         self.assertEqual(approved["status"], "HUMAN_APPROVED")
 
@@ -1006,8 +1008,11 @@ class InvoiceWorkflowTest(unittest.TestCase):
                                  "METRON_INVALID_INPUT")
         fixture = self.email_acceptance_fixture("terms-invoice")
         self.call("deal-accept", identifier=fixture["deal"]["id"], data=fixture["evidence"])
+        payment_terms = self.confirm_customer_payment_terms(fixture, due_at="2026-12-08")
+        self.call("deal-payment-terms-confirm", identifier=fixture["deal"]["id"], data=payment_terms)
         self.call("deal-approve", identifier=fixture["deal"]["id"], data={"payer_wallet": WALLET})
         invoice = self.call("invoice-create", identifier=fixture["deal"]["id"])
+        self.assertEqual(self.call("invoice-get", identifier=invoice["id"])["due_at"], payment_terms["due_at"])
         self.call("invoice-post", identifier=invoice["id"])
         document = self.call("invoice-get", identifier=invoice["id"])
         deal_terms = document["deal"]["terms"]
@@ -1017,6 +1022,172 @@ class InvoiceWorkflowTest(unittest.TestCase):
         self.assertEqual(deal_terms["scope"], fixture["offer_terms"]["scope"])
         self.assertEqual(deal_terms["subjects"], fixture["offer_terms"]["subjects"])
         self.assertEqual(deal_terms["constraints"], fixture["offer_terms"]["constraints"])
+
+    def test_customer_payment_terms_are_append_only_verified_and_drive_email_invoice(self) -> None:
+        fixture = self.email_acceptance_fixture("payment-terms-evidence")
+        deal_id = fixture["deal"]["id"]
+        self.call("deal-accept", identifier=deal_id, data=fixture["evidence"])
+        with sqlite3.connect(self.home / "metron.sqlite") as db:
+            deal_before = db.execute("SELECT status,accepted_at,approved_at,terms_json FROM deals WHERE id=?", (deal_id,)).fetchone()
+            acceptance_before = db.execute("SELECT id,data_json,created_at FROM events "
+                                           "WHERE event_type='CUSTOMER_ACCEPTANCE_EVIDENCE_LINKED' AND entity_id=?",
+                                           (deal_id,)).fetchone()
+
+        evidence = self.confirm_customer_payment_terms(fixture, due_at="2026-12-08")
+        recorded = self.call("deal-payment-terms-confirm", identifier=deal_id, data=evidence)
+        replay = self.call("deal-payment-terms-confirm", identifier=deal_id, data=evidence)
+        with sqlite3.connect(self.home / "metron.sqlite") as db:
+            deal_after = db.execute("SELECT status,accepted_at,approved_at,terms_json FROM deals WHERE id=?", (deal_id,)).fetchone()
+            acceptance_after = db.execute("SELECT id,data_json,created_at FROM events WHERE id=?",
+                                          (acceptance_before[0],)).fetchone()
+            events = db.execute("SELECT data_json FROM events WHERE event_type='CUSTOMER_PAYMENT_TERMS_CONFIRMED' "
+                                "AND entity_type='deal' AND entity_id=?", (deal_id,)).fetchall()
+
+        self.assertEqual(recorded["evidence_status"], "RECORDED")
+        self.assertEqual(replay["evidence_status"], "EXISTS")
+        self.assertEqual(len(events), 1)
+        self.assertEqual(deal_after, deal_before)
+        self.assertEqual(acceptance_after, acceptance_before)
+        self.assertEqual(json.loads(events[0][0]), {
+            "account_email": fixture["account"], "customer_email": "buyer@example.invalid",
+            "conversation_id": fixture["conversation"]["conversation_id"],
+            "gmail_message_id": evidence["gmail_message_id"],
+            "gmail_thread_id": fixture["conversation"]["gmail_thread_id"],
+            "deal_id": deal_id, "payer_wallet": WALLET, "due_at": "2026-12-08",
+            "buyer_confirmation_excerpt": evidence["buyer_confirmation_excerpt"],
+            "confirmation_excerpt_sha256": hashlib.sha256(
+                evidence["buyer_confirmation_excerpt"].encode("utf-8")
+            ).hexdigest(),
+        })
+
+        mismatch = "0x2222222222222222222222222222222222222222"
+        self.assertEqual(self.call_error("deal-approve", identifier=deal_id,
+                                         data={"payer_wallet": mismatch}), "METRON_COUNTERPARTY_UNVERIFIED")
+        with sqlite3.connect(self.home / "metron.sqlite") as db:
+            after_failed_approval = db.execute("SELECT status,accepted_at,approved_at,terms_json FROM deals WHERE id=?",
+                                               (deal_id,)).fetchone()
+            approval_events = db.execute("SELECT COUNT(*) FROM events WHERE event_type='HUMAN_APPROVED' "
+                                         "AND entity_id=?", (deal_id,)).fetchone()[0]
+        self.assertEqual(after_failed_approval, deal_before)
+        self.assertEqual(approval_events, 0)
+
+        self.call("deal-approve", identifier=deal_id, data={"payer_wallet": WALLET})
+        self.assertEqual(self.call_error("invoice-create", identifier=deal_id,
+                                         data={"due_at": "2026-12-09"}), "METRON_INVALID_INPUT")
+        invoice = self.call("invoice-create", identifier=deal_id)
+        self.assertEqual(self.call("invoice-get", identifier=invoice["id"])["due_at"], "2026-12-08")
+        self.assertEqual(self.call("invoice-create", identifier=deal_id)["id"], invoice["id"])
+        with sqlite3.connect(self.home / "metron.sqlite") as db:
+            db.execute("DELETE FROM events WHERE event_type='CUSTOMER_PAYMENT_TERMS_CONFIRMED' AND entity_id=?",
+                       (deal_id,))
+        self.assertEqual(self.call("invoice-create", identifier=deal_id)["id"], invoice["id"])
+
+    def test_customer_payment_terms_reject_missing_mismatched_and_conflicting_evidence(self) -> None:
+        fixture = self.email_acceptance_fixture("payment-terms-invalid")
+        deal_id = fixture["deal"]["id"]
+        self.call("deal-accept", identifier=deal_id, data=fixture["evidence"])
+        evidence = self.confirm_customer_payment_terms(fixture)
+
+        self.assertEqual(self.call_error(
+            "deal-payment-terms-confirm", identifier=deal_id,
+            data={key: value for key, value in evidence.items() if key != "buyer_confirmation_excerpt"},
+        ), "METRON_INVALID_INPUT")
+        for excerpt in (
+            "I confirm the invoice wallet and due date.",
+            f"I confirm wallet 0x2222222222222222222222222222222222222222 and due date {evidence['due_at']}.",
+            f"I confirm wallet {WALLET} and due date 2026-12-09.",
+        ):
+            with self.subTest(excerpt=excerpt):
+                self.assertEqual(self.call_error(
+                    "deal-payment-terms-confirm", identifier=deal_id,
+                    data={**evidence, "buyer_confirmation_excerpt": excerpt},
+                ), "METRON_EMAIL_PAYMENT_TERMS_EVIDENCE_INVALID")
+
+        self.assertEqual(self.call_error("deal-payment-terms-confirm", identifier=deal_id,
+                                         data=dict(evidence, gmail_message_id="unrecorded-message")),
+                         "METRON_EMAIL_IDENTITY_MISMATCH")
+        for change in ({"account_email": "other@example.invalid"},
+                       {"customer_email": "other@example.invalid"},
+                       {"gmail_thread_id": "other-thread"},
+                       {"conversation_id": "other-conversation"}):
+            with self.subTest(change=change):
+                self.assertEqual(self.call_error("deal-payment-terms-confirm", identifier=deal_id,
+                                                 data={**evidence, **change}), "METRON_EMAIL_IDENTITY_MISMATCH")
+        self.assertEqual(self.call_error("deal-payment-terms-confirm", identifier=deal_id,
+                                         data=dict(evidence, due_at="not-a-date")), "METRON_INVALID_INPUT")
+        self.assertEqual(self.call("deal-payment-terms-confirm", identifier=deal_id, data=evidence)["evidence_status"],
+                         "RECORDED")
+        changed_due_at = "2026-12-09"
+        self.assertEqual(self.call_error("deal-payment-terms-confirm", identifier=deal_id,
+                                         data=dict(evidence, due_at=changed_due_at,
+                                                   buyer_confirmation_excerpt=(
+                                                       f"I confirm payer wallet {WALLET} and invoice due date {changed_due_at}."
+                                                   ))),
+                         "METRON_EMAIL_PAYMENT_TERMS_CONFLICT")
+        another_message = self.confirm_customer_payment_terms(fixture, gmail_message_id="payment-terms-second")
+        self.assertEqual(self.call_error("deal-payment-terms-confirm", identifier=deal_id, data=another_message),
+                         "METRON_EMAIL_PAYMENT_TERMS_CONFLICT")
+
+    def test_customer_payment_terms_message_id_is_account_scoped(self) -> None:
+        first = self.email_acceptance_fixture("payment-terms-account-one")
+        second = self.email_acceptance_fixture("payment-terms-account-two")
+        self.call("deal-accept", identifier=first["deal"]["id"], data=first["evidence"])
+        self.call("deal-accept", identifier=second["deal"]["id"], data=second["evidence"])
+        one = self.confirm_customer_payment_terms(first, gmail_message_id="shared-payment-message")
+        two = self.confirm_customer_payment_terms(second, gmail_message_id="shared-payment-message")
+
+        self.assertEqual(self.call("deal-payment-terms-confirm", identifier=first["deal"]["id"], data=one)["evidence_status"],
+                         "RECORDED")
+        self.assertEqual(self.call("deal-payment-terms-confirm", identifier=second["deal"]["id"], data=two)["evidence_status"],
+                         "RECORDED")
+        with sqlite3.connect(self.home / "metron.sqlite") as db:
+            records = db.execute("SELECT data_json FROM events WHERE event_type='CUSTOMER_PAYMENT_TERMS_CONFIRMED'").fetchall()
+        self.assertEqual(len(records), 2)
+        self.assertEqual({json.loads(row[0])["account_email"] for row in records},
+                         {first["account"], second["account"]})
+
+    def test_email_approval_and_invoice_fail_closed_without_valid_payment_terms_event(self) -> None:
+        missing = self.email_acceptance_fixture("payment-terms-missing")
+        self.call("deal-accept", identifier=missing["deal"]["id"], data=missing["evidence"])
+        self.assertEqual(self.call_error("deal-approve", identifier=missing["deal"]["id"],
+                                         data={"payer_wallet": WALLET}),
+                         "METRON_EMAIL_PAYMENT_TERMS_EVIDENCE_REQUIRED")
+        self.assertEqual(self.call("deal-get", identifier=missing["deal"]["id"])["status"], "PENDING_HUMAN")
+
+        corrupted = self.email_acceptance_fixture("payment-terms-corrupt")
+        self.call("deal-accept", identifier=corrupted["deal"]["id"], data=corrupted["evidence"])
+        payment_terms = self.confirm_customer_payment_terms(corrupted)
+        self.call("deal-payment-terms-confirm", identifier=corrupted["deal"]["id"], data=payment_terms)
+        self.call("deal-approve", identifier=corrupted["deal"]["id"], data={"payer_wallet": WALLET})
+        with sqlite3.connect(self.home / "metron.sqlite") as db:
+            db.execute("UPDATE events SET data_json='not-json' WHERE event_type='CUSTOMER_PAYMENT_TERMS_CONFIRMED' "
+                       "AND entity_id=?", (corrupted["deal"]["id"],))
+        self.assertEqual(self.call_error("invoice-create", identifier=corrupted["deal"]["id"]),
+                         "METRON_EMAIL_PAYMENT_TERMS_EVIDENCE_INVALID")
+        with sqlite3.connect(self.home / "metron.sqlite") as db:
+            invoice_count = db.execute("SELECT COUNT(*) FROM sales_invoices WHERE deal_id=?",
+                                       (corrupted["deal"]["id"],)).fetchone()[0]
+        self.assertEqual(invoice_count, 0)
+
+    def test_corrupt_customer_confirmation_excerpt_blocks_final_approval(self) -> None:
+        fixture = self.email_acceptance_fixture("payment-terms-content-corrupt")
+        deal_id = fixture["deal"]["id"]
+        self.call("deal-accept", identifier=deal_id, data=fixture["evidence"])
+        evidence = self.confirm_customer_payment_terms(fixture)
+        self.call("deal-payment-terms-confirm", identifier=deal_id, data=evidence)
+        with sqlite3.connect(self.home / "metron.sqlite") as db:
+            row = db.execute("SELECT id,data_json FROM events WHERE event_type=? AND entity_id=?",
+                             ("CUSTOMER_PAYMENT_TERMS_CONFIRMED", deal_id)).fetchone()
+            payload = json.loads(row[1])
+            payload["buyer_confirmation_excerpt"] = "I confirm unrelated terms."
+            db.execute("UPDATE events SET data_json=? WHERE id=?", (json.dumps(payload), row[0]))
+
+        self.assertEqual(self.call_error("deal-approve", identifier=deal_id,
+                                         data={"payer_wallet": WALLET}),
+                         "METRON_EMAIL_PAYMENT_TERMS_EVIDENCE_INVALID")
+        deal = self.call("deal-get", identifier=deal_id)
+        self.assertEqual(deal["status"], "PENDING_HUMAN")
+        self.assertIsNone(deal["approved_at"])
 
     def email_acceptance_fixture(self, key: str, *, acceptance_key: str | None = None) -> dict:
         account = f"{key}@example.invalid"
@@ -1042,7 +1213,7 @@ class InvoiceWorkflowTest(unittest.TestCase):
                  "commercial_service": service, "email_conversation_id": conversation["conversation_id"],
                  "quantity": 1, "deliverables": service["deliverables"],
                  "delivery_days": service["delivery_days"], "capacity_unit": service["capacity_unit"],
-                 "due_at": "2026-11-12"}
+                 }
         conflicting_terms = json.loads(json.dumps(terms))
         conflicting_terms["subjects"] = ["Not in the confirmed offer"]
         self.assertEqual(self.call_error("deal-create", data={
@@ -1063,6 +1234,19 @@ class InvoiceWorkflowTest(unittest.TestCase):
         return {"account": account, "owner": owner, "service": service, "conversation": conversation,
                 "offer_terms": offer_terms, "offer_message_id": offer_message_id,
                 "acceptance_message_id": acceptance_message_id, "deal": deal, "evidence": evidence}
+
+    def confirm_customer_payment_terms(self, fixture: dict, *, due_at: str = "2026-11-12",
+                                       gmail_message_id: str | None = None) -> dict:
+        message_id = gmail_message_id or f"{fixture['deal']['id']}-payment-terms"
+        conversation = fixture["conversation"]
+        self.call("email-state", data={"action": "message-claim", "account_email": fixture["account"],
+                                       "owner_token": fixture["owner"], "gmail_message_id": message_id,
+                                       "gmail_thread_id": conversation["gmail_thread_id"],
+                                       "customer_email": "buyer@example.invalid"})
+        return {"account_email": fixture["account"], "customer_email": "buyer@example.invalid",
+                "conversation_id": conversation["conversation_id"], "gmail_message_id": message_id,
+                "gmail_thread_id": conversation["gmail_thread_id"], "payer_wallet": WALLET, "due_at": due_at,
+                "buyer_confirmation_excerpt": f"I confirm payer wallet {WALLET} and invoice due date {due_at}."}
 
     def create_confirmed_email_offer(self, account: str, owner: str, conversation: dict, service: dict,
                                      key: str, offer_terms: dict, *, price: int = 15000000,
@@ -1136,6 +1320,9 @@ class InvoiceWorkflowTest(unittest.TestCase):
                     "accepted_terms": {"subjects": offer_terms["subjects"],
                                        "constraints": offer_terms["constraints"]}}
         self.assertEqual(self.call("deal-accept", identifier=deal["id"], data=evidence)["status"], "PENDING_HUMAN")
+        payment_fixture = {"account": account, "owner": owner, "conversation": conversation, "deal": deal}
+        payment_terms = self.confirm_customer_payment_terms(payment_fixture)
+        self.call("deal-payment-terms-confirm", identifier=deal["id"], data=payment_terms)
         self.assertEqual(self.call("deal-approve", identifier=deal["id"], data={"payer_wallet": WALLET})["status"],
                          "HUMAN_APPROVED")
         first = self.call("invoice-create", identifier=deal["id"])
