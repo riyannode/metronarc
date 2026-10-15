@@ -34,3 +34,7 @@ Send the PDF in the existing Gmail thread using the native Gmail connector's `gm
 The METRON policy skill owns goals, spending limits, deal state transitions, invoices, Circle payment evidence, accounting, and EconomicRegistry. Use it when an email conversation reaches those decisions. Do not create a payment, invoice, or registry record from a communication alone. Report only new actionable messages, genuine blockers, or a required human decision; otherwise remain quiet.
 
 After invoice delivery, leave settlement verification and reconciliation to `metron-payment` through the METRON financial CLI. Gmail replies, screenshots, and customer payment claims do not mark an invoice paid.
+
+## Customer deliverables
+
+Send a contracted deliverable only after verifying the final artifact and the deal's saved customer terms. Use `send-prepare` with kind `DELIVERABLE`, key `deliverable:<deal-id>`, the existing deal conversation, a confirmed outbound message ID in that same Gmail thread, the verified counterparty address, and a SHA-256 hash of the exact message plus attachment. METRON permits this action only for the matching `CLOSED_WON` email deal and rechecks deal, customer, source-message, and thread bindings at `send-start`. Then use the normal lock, suppression, rolling limit, and one-send sequence. A deliverable send does not change deal or invoice state. Never reuse an invoice action or resolve an unrelated `UNKNOWN` send to deliver a file.

@@ -20,6 +20,8 @@ flowchart LR
 
 Circle Terms are never inferred from METRON use; see [Circle setup](docs/INSTALL.md#circle-setup) for the one-time explicit consent flow. Payment execution requires an authenticated Circle Agent Wallet and current Circle evidence. EconomicRegistry is METRON's shared non-custodial provenance contract on Arc Testnet at `0x547552585d8d995c5063820b2950e0db52b4cab4`. Contract deployment and read-only verification are not payment evidence. Synthetic fixtures do not prove live-provider behavior; testnet and synthetic records must remain labeled as such.
 
+The [current E2E and submission evidence](docs/SUBMISSION.md) distinguishes the verified Arc Testnet customer workflow from post-revenue service purchases and public-hackathon requirements. The pilot buyer is a test scenario, not an independent customer; testnet receipts are not mainnet revenue.
+
 ## Local quickstart
 
 Requirements: Python 3.11+, Bun for invoice PDF rendering, Circle CLI for provider operations, and Foundry for contract build/tests.
@@ -47,7 +49,7 @@ In ChatGPT desktop, open Plugins, add a marketplace from the repository `https:/
 
 Bootstrap CLI prepared for npm publication. After the package is published, run `npx @riyannode/metron`. The npm package only registers the GitHub marketplace and prints setup steps; the canonical plugin remains in this repository. This command is not available until npm publication.
 
-The local marketplace install and persisted state were verified in three fresh Codex CLI sessions; desktop-app plugin UI verification remains open.
+METRON is distributed as version `0.2.0` with four skills. Read-only persistence was verified in a genuinely new Codex task with the installed plugin; rerun after refreshing this branch's changes. Desktop-app plugin UI verification remains a separate check, and a new Python process alone is not a fresh-session test.
 
 ## Accounting semantics
 

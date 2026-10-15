@@ -184,6 +184,39 @@ def _invoice_for_delivery(db: sqlite3.Connection, invoice_id: str, conversation:
     return row
 
 
+def _deal_for_deliverable(
+    db: sqlite3.Connection, action_key: str, source_message_id: str,
+    conversation: sqlite3.Row, recipient: str,
+) -> sqlite3.Row:
+    deal_id = conversation["deal_id"]
+    if not deal_id or action_key != f"deliverable:{deal_id}":
+        raise finance.DomainError("METRON_EMAIL_DELIVERABLE_NOT_ELIGIBLE")
+    deal = db.execute(
+        "SELECT d.status,d.terms_json,c.external_ref FROM deals d "
+        "JOIN counterparties c ON c.id=d.counterparty_id WHERE d.id=?",
+        (deal_id,),
+    ).fetchone()
+    if deal is None or deal["status"] != "CLOSED_WON":
+        raise finance.DomainError("METRON_EMAIL_DELIVERABLE_NOT_ELIGIBLE")
+    try:
+        terms = json.loads(deal["terms_json"])
+        customer = _email({"recipient_email": deal["external_ref"]}, "recipient_email")
+    except (TypeError, json.JSONDecodeError, finance.DomainError):
+        raise finance.DomainError("METRON_EMAIL_DELIVERABLE_NOT_ELIGIBLE") from None
+    if not isinstance(terms, dict) or terms.get("email_conversation_id") != conversation["id"]:
+        raise finance.DomainError("METRON_EMAIL_DELIVERABLE_NOT_ELIGIBLE")
+    if recipient != customer or conversation["customer_email"] != customer:
+        raise finance.DomainError("METRON_EMAIL_IDENTITY_MISMATCH")
+    source = db.execute(
+        "SELECT gmail_thread_id FROM email_messages WHERE account_email=? AND gmail_message_id=? "
+        "AND conversation_id=? AND direction='OUTBOUND' AND status='PROCESSED'",
+        (conversation["account_email"], source_message_id, conversation["id"]),
+    ).fetchone()
+    if source is None or not conversation["gmail_thread_id"] or source["gmail_thread_id"] != conversation["gmail_thread_id"]:
+        raise finance.DomainError("METRON_EMAIL_MESSAGE_NOT_FOUND")
+    return deal
+
+
 def _is_suppressed(db: sqlite3.Connection, account: str, recipient: str) -> bool:
     return db.execute(
         "SELECT 1 FROM email_contact_suppressions WHERE account_email=? AND recipient_email=?",
@@ -922,9 +955,9 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
         invoice_id = _text(data, "invoice_id", 64) if data.get("invoice_id") is not None else None
         recipient = _email(data, "recipient_email")
         content_hash = _text(data, "content_sha256", 64).lower()
-        if kind not in {"OUTREACH", "REPLY", "FOLLOW_UP", "INVOICE"} or not re.fullmatch(r"[0-9a-f]{64}", content_hash):
+        if kind not in {"OUTREACH", "REPLY", "FOLLOW_UP", "INVOICE", "DELIVERABLE"} or not re.fullmatch(r"[0-9a-f]{64}", content_hash):
             raise finance.DomainError("METRON_INVALID_INPUT")
-        if (kind == "OUTREACH" and (source is not None or invoice_id is not None or not key.startswith("outreach:"))) or (kind == "REPLY" and (source is None or invoice_id is not None or key != f"reply:{source}")) or (kind == "FOLLOW_UP" and (source is None or invoice_id is not None or key != f"follow-up:{source}")) or (kind == "INVOICE" and (source is not None or invoice_id is None or key != f"invoice:{invoice_id}")):
+        if (kind == "OUTREACH" and (source is not None or invoice_id is not None or not key.startswith("outreach:"))) or (kind == "REPLY" and (source is None or invoice_id is not None or key != f"reply:{source}")) or (kind == "FOLLOW_UP" and (source is None or invoice_id is not None or key != f"follow-up:{source}")) or (kind == "INVOICE" and (source is not None or invoice_id is None or key != f"invoice:{invoice_id}")) or (kind == "DELIVERABLE" and (source is None or invoice_id is not None)):
             raise finance.DomainError("METRON_INVALID_INPUT")
         with store.transaction(db):
             _lock(db, account, owner)
@@ -940,6 +973,14 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
                     (invoice_id,),
                 ).fetchone()
                 if other_account is not None and other_account["account_email"] != account:
+                    raise finance.DomainError("METRON_EMAIL_ACTION_CONFLICT")
+            if kind == "DELIVERABLE":
+                _deal_for_deliverable(db, key, source or "", conversation, recipient)
+                prior_delivery = db.execute(
+                    "SELECT account_email FROM email_send_attempts WHERE action_kind='DELIVERABLE' AND action_key=?",
+                    (key,),
+                ).fetchone()
+                if prior_delivery is not None and prior_delivery["account_email"] != account:
                     raise finance.DomainError("METRON_EMAIL_ACTION_CONFLICT")
             if kind == "REPLY":
                 inbound = db.execute(
@@ -1011,6 +1052,10 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
                     return {"status": "FAILED", "attempt_id": attempt["id"], "error_code": "METRON_EMAIL_OPTED_OUT"}
                 if attempt["action_kind"] == "INVOICE":
                     _invoice_for_delivery(db, attempt["invoice_id"], conversation, attempt["recipient_email"])
+                elif attempt["action_kind"] == "DELIVERABLE":
+                    _deal_for_deliverable(
+                        db, key, attempt["source_message_id"], conversation, attempt["recipient_email"]
+                    )
                 offer = db.execute(
                     "SELECT service_id,policy_fingerprint,terms_json FROM email_offers WHERE account_email=? AND action_key=? "
                     "AND direction='OUTBOUND'",

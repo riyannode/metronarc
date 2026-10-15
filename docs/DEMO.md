@@ -1,15 +1,14 @@
-# Demo outline
+# Demo storyboard (under three minutes)
 
-Keep any recording under three minutes. Label all testnet activity and synthetic data clearly.
+**No recording exists yet.** This is a truthful storyboard for the current Arc Testnet pilot, not evidence that a demo was recorded or submitted. Label all testnet activity and the test-buyer scenario clearly.
 
-1. Show a configured Circle operating wallet, revenue goal, and policy including the minimum balance retained after a spend.
-2. Search and inspect a current Circle Marketplace service. Show the Spend Intent and deterministic decision before any payment. An `ALLOW` intent is automatically `APPROVED`; `ESCALATE` requires persisted human approval; `DENY` cannot execute.
-3. In a separately authorized controlled testnet demo, make one bounded x402 call from an `APPROVED` intent. Show evidence, Payment Entry, and the balanced expense journal. Do not add a second human approval to an ordinary `ALLOW` intent.
-4. Use `metron-email` and the host's connected email tools for verified one-to-one outreach, thread-aware replies, and negotiation. Routine communication is autonomous. Standard invoice fields do not by themselves escalate; custom/legal or below-minimum terms need a pre-acceptance exception decision. When the customer accepts terms, persist `PENDING_HUMAN`, present the exact deal in interactive Codex chat, and wait for the operator's direct instruction before final approval. Scheduled runs never initiate approval commands. This is an instruction-based testnet boundary, not production-grade authorization.
-5. Approve the deal, post its invoice, then reconcile a controlled confirmed incoming testnet payment against the invoice.
-6. Show the resulting Cash/AR journal, reinvestment calculation, collected revenue, confirmed spend, net contribution, and realized ROI on the local read-only dashboard, then restart the host and show the same SQLite state.
-7. EconomicRegistry is METRON's shared non-custodial provenance contract on Arc Testnet at `0x547552585d8d995c5063820b2950e0db52b4cab4`. One spend can link multiple distinct revenue settlements. Users do not deploy or fund it; a missing, pending, or failed registry record does not change payment or accounting truth.
+1. **0:00–0:20 — Runtime and controls.** Show METRON `0.2.0`, its four skills, the active goal, earned operating capital, per-action/daily caps, minimum retained wallet balance, and the fact that SQLite is the persistent ledger.
+2. **0:20–0:50 — Customer workflow.** Show the existing thread's accepted scope, the distinct `HUMAN_APPROVED` event, the posted invoice, and the final report attachment/outbox confirmation. The test buyer is not an independent customer.
+3. **0:50–1:25 — Settlement and accounting.** Show the Circle-verified incoming 22 USDC Arc Testnet receipt, invoice `PAID`, deal `CLOSED_WON`, Payment Entry/Evidence, balanced cash/AR journal, and the 2.20 USDC reinvestment allocation. Do not imply mainnet revenue.
+4. **1:25–1:55 — Provenance.** Show the two confirmed EconomicRegistry SPEND records and explain that both x402 payments predate the incoming invoice payment. Revenue provenance is `SKIPPED / NO_EXPLICIT_ATTRIBUTION`; no revenue record was committed.
+5. **1:55–2:35 — Self-funding gate.** Show the deterministic policy and Circle Marketplace result. The active earned-capital policy permits at most 0.0001 USDC per action and per day, and the current search found no useful Arc Testnet service within that cap. No post-revenue Spend Intent or payment was created. Stop at the policy gate.
+6. **2:35–2:55 — Recovery.** In a genuinely new Codex session, show the same SQLite deal, invoice, payment, journal, email outbox, and dashboard state without running `init`. Leave historical `UNKNOWN` and `PROCESSING` rows unchanged.
 
-Do not demonstrate a vault, internal reserve transfer, or user contract deployment/funding. EconomicRegistry is shared Arc Testnet provenance infrastructure; Circle payments settle directly to or from the operating wallet.
+Do not demonstrate a vault, internal reserve transfer, user contract deployment/funding, or a post-revenue x402 purchase that has not occurred. EconomicRegistry is shared Arc Testnet provenance infrastructure; Circle payments settle directly to or from the operating wallet.
 
 Do not stage synthetic records as traction or describe a Circle transaction hash as the business transaction.
