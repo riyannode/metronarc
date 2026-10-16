@@ -1,5 +1,4 @@
-import { useState } from 'react'
-import { Blocks, Github, Pause, Play } from 'lucide-react'
+import { Blocks, Github } from 'lucide-react'
 import Reveal from './Reveal'
 
 const integrations = [
@@ -14,8 +13,6 @@ const integrations = [
 ]
 
 export default function Integrations() {
-  const [paused, setPaused] = useState(false)
-
   return (
     <section id="integrations" aria-labelledby="integrations-title" className="relative flex flex-col items-center overflow-hidden bg-[#FCFDFF] px-6 py-24 antialiased md:py-36">
       <div className="pointer-events-none absolute left-1/2 top-0 h-[300px] w-[800px] -translate-x-1/2 rounded-full bg-[#2775CA]/[0.07] blur-[120px]" />
@@ -27,11 +24,10 @@ export default function Integrations() {
           <Reveal delay={0.2}><p className="mx-auto mt-4 max-w-[480px] text-base leading-relaxed text-[#161716]/50">METRON connects your agent to payment tools, customer email, and accounting you can verify.</p></Reveal>
         </div>
         <div className="marquee-mask relative w-full select-none overflow-hidden py-4" aria-label="Supported tools and components">
-          <div className="marquee-track flex w-max whitespace-nowrap" style={{ animationPlayState: paused ? 'paused' : 'running' }}>
+          <div className="marquee-track flex w-max whitespace-nowrap">
             {[0, 1].map((copy) => <div className="flex shrink-0" key={copy} aria-hidden={copy === 1 ? true : undefined}>{integrations.map(({ name, label, Icon, src, width }) => <div key={name} role="img" aria-label={name} className="integration-chip group mx-4 flex min-w-[160px] cursor-default items-center justify-center gap-2 whitespace-nowrap rounded-2xl px-8 py-5"><span className="integration-icon flex h-10 shrink-0 items-center justify-center text-[#1D5FA8]" aria-hidden="true">{src ? <img src={src} alt="" width={width} height={40} className="h-10 object-contain" /> : Icon && <Icon className="h-9 w-auto" />}</span>{label && <span className="text-sm font-medium text-[#161716]/75">{label}</span>}</div>)}</div>)}
           </div>
         </div>
-        <button type="button" onClick={() => setPaused(!paused)} aria-pressed={paused} className="button mt-5 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[10px] text-[#161716]/50">{paused ? <Play size={11} /> : <Pause size={11} />} {paused ? 'Resume' : 'Pause'} motion</button>
       </div>
     </section>
   )

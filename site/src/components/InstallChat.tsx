@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useInView, useReducedMotion } from 'framer-motion'
-import { Pause, Play, Sparkles } from 'lucide-react'
+import { Sparkles } from 'lucide-react'
 
 const conversation = [
   { role: 'user', text: 'Use METRON. Show status' },
@@ -20,12 +20,11 @@ export default function InstallChat() {
   const viewport = useRef<HTMLDivElement>(null)
   const visible = useInView(frame, { amount: 0.2 })
   const reduced = useReducedMotion()
-  const [paused, setPaused] = useState(false)
   const [hidden, setHidden] = useState(() => document.hidden)
   const [index, setIndex] = useState(0)
   const [characters, setCharacters] = useState(0)
   const [phase, setPhase] = useState<Phase>('typing')
-  const running = !paused && !hidden && visible && !reduced
+  const running = !hidden && visible && !reduced
 
   useEffect(() => {
     const onVisibility = () => setHidden(document.hidden)
@@ -69,8 +68,7 @@ export default function InstallChat() {
     <div ref={frame} className="install-chat" data-paused={!running}>
       <div className="install-chat__header">
         <span className="install-chat__avatar"><Sparkles size={16} aria-hidden="true" /></span>
-        <div><p className="install-chat__title">METRON Agent</p><p className="install-chat__subtitle">Illustrative conversation · No live actions</p></div>
-        {!reduced && <button type="button" className="install-chat__pause" aria-label={paused ? 'Resume chat demo' : 'Pause chat demo'} onClick={() => setPaused(value => !value)}>{paused ? <Play size={15} /> : <Pause size={15} />}</button>}
+        <div><p className="install-chat__title">METRON Agent</p><p className="install-chat__subtitle">Illustrative conversation</p></div>
       </div>
       <div ref={viewport} className="install-chat__viewport" role="region" aria-label="METRON skills conversation demo" tabIndex={0}>
         <ol className="install-chat__messages" data-fading={!reduced && phase === 'fading'}>

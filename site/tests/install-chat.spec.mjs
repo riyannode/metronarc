@@ -12,7 +12,7 @@ async function openChat(page) {
   await page.locator('.install-chat').scrollIntoViewIfNeeded()
 }
 
-test('chat types, responds with four skills, scrolls, pauses and loops', async ({ page }) => {
+test('chat types, responds with four skills, scrolls and loops automatically', async ({ page }) => {
   await page.clock.install()
   await openChat(page)
   const messages = page.locator('.install-chat__message')
@@ -23,11 +23,7 @@ test('chat types, responds with four skills, scrolls, pauses and loops', async (
   const partial = await messages.first().locator('p').textContent()
   expect(partial.length).toBeGreaterThan(0)
   expect(partial.length).toBeLessThan('Use METRON. Show status'.length)
-  await page.getByRole('button', { name: 'Pause chat demo' }).click()
-  const pausedText = await messages.first().locator('p').textContent()
-  await page.clock.runFor(2000)
-  await expect(messages.first().locator('p')).toHaveText(pausedText)
-  await page.getByRole('button', { name: 'Resume chat demo' }).click()
+  await expect(page.locator('.install-chat button')).toHaveCount(0)
   await advance(page, 3000)
   await expect(messages.first()).toContainText('Use METRON. Show status')
   await expect(page.getByLabel('METRON Agent is typing')).toBeVisible()
