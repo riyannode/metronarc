@@ -43,7 +43,7 @@ export default function Dashboard() {
     <div id="dashboard-showcase" className="relative z-10 mx-auto mt-[100px] h-[455px] max-w-[1250px] overflow-hidden rounded-t-[40px] px-0" role="region" aria-label="METRON example with historical Arc Testnet records">
       <div className="absolute -inset-4 z-0 rounded-[35px] bg-[#2775CA]/20 opacity-40 blur-[120px]" />
       <div className="dashboard-panel relative flex h-full flex-col overflow-hidden rounded-t-[40px] border border-[#2775CA]/15 bg-white/85 backdrop-blur-[50px] md:flex-row">
-        <aside className="flex shrink-0 items-center border-b border-[#2775CA]/10 bg-[#2775CA]/[0.02] px-3 py-3 md:h-[650px] md:w-[80px] md:flex-col md:border-b-0 md:px-0 md:py-10">
+        <aside className="flex shrink-0 items-center border-b border-[#2775CA]/10 bg-[#2775CA]/[0.02] px-3 py-3 md:h-[650px] md:w-[80px] md:flex-col md:border-b-0 md:border-r md:px-0 md:py-10">
           <div className="hidden h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#2775CA] to-[#1D5FA8] text-white md:flex" aria-hidden="true"><ChartNoAxesColumnIncreasing size={24} /></div>
           <nav className="flex w-full justify-between gap-1 md:mt-10 md:w-auto md:flex-col md:gap-5" aria-label="Dashboard sections">
             {sections.map(({ id, label, icon: Icon }, index) => (
@@ -68,7 +68,7 @@ export default function Dashboard() {
           </div>
           <div id="dashboard-screen" role="region" aria-label={`${section.label} example`} tabIndex={0} ref={scroll} className="dashboard-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain">
             <AnimatePresence mode="wait" initial={false}>
-              <motion.div key={active} data-dashboard-screen={active} initial={{ opacity: instant ? 1 : 0, y: instant ? 0 : 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: instant ? 0 : -4 }} transition={{ duration: instant ? 0 : 0.16, ease: [0.23, 1, 0.32, 1] }} className={active === 'overview' ? 'pb-40' : 'pb-2'}>
+              <motion.div key={active} data-dashboard-screen={active} initial={{ opacity: instant ? 1 : 0, y: instant ? 0 : 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: instant ? 0 : -4 }} transition={{ duration: instant ? 0 : 0.16, ease: [0.23, 1, 0.32, 1] }} className="pb-40">
                 {active === 'overview' && (
                   <div className="mb-10 grid grid-cols-1 gap-8 lg:grid-cols-3">
                     <div className="min-h-[300px] rounded-[40px] border border-[#2775CA]/15 bg-gradient-to-br from-[#2775CA]/[0.07] to-white/20 p-6 sm:p-8 lg:col-span-2 lg:p-10">
@@ -154,7 +154,7 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
-      {active === 'overview' && <div className="pointer-events-none absolute bottom-0 left-0 z-20 h-[38%] w-full bg-gradient-to-t from-white via-white/60 to-transparent md:left-[80px] md:w-[calc(100%-80px)]" />}
+      <div className="pointer-events-none absolute bottom-0 left-0 z-20 h-[38%] w-full bg-gradient-to-t from-white via-white/60 to-transparent md:left-[80px] md:w-[calc(100%-80px)]" />
     </div>
   )
 }

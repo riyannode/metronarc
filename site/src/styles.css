@@ -34,8 +34,6 @@ a, button { touch-action: manipulation; }
 }
 .dashboard-panel { border-bottom-color: transparent; box-shadow: 0 -25px 100px rgba(39,117,202,0.09), inset 0 1px 1px rgba(255,255,255,0.8); }
 .dashboard-panel > aside { border-bottom-color: transparent; }
-.dashboard-panel::after { content: ''; position: absolute; z-index: 2; top: 0; bottom: 0; left: 79px; display: none; width: 1px; pointer-events: none; background: linear-gradient(to bottom, rgb(39 117 202 / 10%) 0%, rgb(39 117 202 / 10%) calc(100% - 48px), transparent 100%); filter: blur(0.75px); }
-@media (min-width: 768px) { .dashboard-panel::after { display: block; } }
 .dashboard-scroll { scrollbar-width: thin; scrollbar-color: rgb(39 117 202 / 20%) transparent; }
 .button { transition: transform 160ms cubic-bezier(0.23,1,0.32,1), background-color 200ms ease, box-shadow 200ms ease; }
 .step-row { transition: border-color 250ms ease, background-color 250ms ease; }
