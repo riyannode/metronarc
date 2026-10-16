@@ -14,7 +14,7 @@ export default function Install() {
     <section id="install" aria-labelledby="install-title" className="relative bg-white px-6 py-20 md:py-28">
       <div className="mx-auto max-w-[1500px]">
         <div className="mx-auto mb-16 max-w-3xl text-center">
-          <Reveal><span className="section-eyebrow mb-8"><Github size={13} /> INSTALL THE METRON PLUGIN</span></Reveal>
+          <Reveal><p className="mb-8 text-[13px] text-[#5C5C5D]">Use GitHub to install METRON. The npm setup tool is not published yet. <a href={repository} target="_blank" rel="noreferrer" aria-label="Open METRON GitHub repository" className="inline-flex align-middle text-[#1D5FA8]"><Github size={15} /></a></p></Reveal>
           <Reveal delay={0.1}><h2 id="install-title" className="reference-heading text-[40px] font-medium leading-[1.1] tracking-tight md:text-[56px]">One Plugin. Run Your Business</h2></Reveal>
           <Reveal delay={0.2}><p className="mt-6 text-[17px] leading-relaxed text-[#5C5C5D]">Install from GitHub, then set your goal and financial rules</p></Reveal>
         </div>
@@ -36,7 +36,6 @@ export default function Install() {
             <a href={installation} className="button mt-5 inline-flex items-center gap-2 text-[13px] font-semibold text-[#1D5FA8]">Read the installation guide <ArrowRight size={13} /></a>
           </Reveal>
         </div>
-        <Reveal delay={0.1}><div className="mt-16 flex flex-wrap items-center justify-center gap-4 text-[12px] text-[#5C5C5D]"><span className="h-1.5 w-1.5 rounded-full bg-[#2775CA]" /><p>Use GitHub to install METRON. The npm setup tool is not published yet.</p><a href={repository} target="_blank" rel="noreferrer" aria-label="Open METRON GitHub repository" className="button text-[#1D5FA8]"><ArrowRight size={15} /></a></div></Reveal>
       </div>
     </section>
   )
