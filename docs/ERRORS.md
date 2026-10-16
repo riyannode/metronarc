@@ -25,6 +25,8 @@ The CLI returns stable codes in `{"ok":false,"error":{"code":...,"message":...}}
 | `METRON_EMAIL_MESSAGE_NOT_FOUND` | The requested Gmail message is not recorded in the associated conversation. Read and claim the exact message before replying. |
 | `METRON_EMAIL_MESSAGE_LOCKED` | This message is not claimed by the current run. Do not process or reply until the active claim is resolved. |
 | `METRON_EMAIL_MESSAGE_ALREADY_FINALIZED` | The inbound message already has a terminal `NO_ACTION` or `REPLY_CONFIRMED` event; do not reopen it through a blocker. |
+| `METRON_EMAIL_MESSAGE_NOT_RECOVERABLE` | This failed message is outside the finance-and-registry recovery path or already has another terminal event or send attempt. Preserve its state and investigate before retrying. |
+| `METRON_EMAIL_RECOVERY_NOT_READY` | The linked invoice, Circle evidence, balanced journal, or all five confirmed V3 records and receipts are not authoritative and complete. Keep the message failed; do not rerun payment or registry dispatch as part of email recovery. |
 | `METRON_EMAIL_COMMERCIAL_POLICY_REQUIRED` | No complete service policy exists for the selected account and service; keep the blocker open until an operator configures one. |
 | `METRON_EMAIL_SERVICE_NOT_FOUND` | The selected service ID is not in this Gmail account's catalog. Read `service-list` and use a matching ID. |
 | `METRON_EMAIL_SERVICE_UNAVAILABLE` | The selected service is inactive or has no available capacity. Do not quote it or accept its terms. |
