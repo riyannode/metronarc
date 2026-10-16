@@ -1,6 +1,7 @@
-import { ArrowRight, Check, Github } from 'lucide-react'
+import { ArrowRight, Github } from 'lucide-react'
 import { installation, repository } from '../content'
 import Reveal from './Reveal'
+import InstallChat from './InstallChat'
 
 const installSteps = [
   ['Add the GitHub marketplace', <>In ChatGPT desktop, open Plugins and choose <strong>Add marketplace from a repository</strong>. Add <a className="text-[#1D5FA8] underline decoration-[#2775CA]/30 underline-offset-4" href={repository} target="_blank" rel="noreferrer">riyannode/metronarc</a> and choose branch <code>master</code>.</>],
@@ -21,17 +22,7 @@ export default function Install() {
         <div className="grid items-start gap-12 lg:grid-cols-2 lg:gap-20">
           <Reveal><ol className="space-y-7">{installSteps.map(([title, content], index) => <li key={title} className="flex gap-5"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#2775CA]/20 bg-[#F3F8FF] text-[11px] font-semibold text-[#1D5FA8]">0{index + 1}</span><div className="pt-1"><h3 className="mb-2 text-[16px] font-semibold">{title}</h3><p className="text-[14px] leading-6 text-[#5C5C5D]">{content}</p></div></li>)}</ol></Reveal>
           <Reveal delay={0.2}>
-            <div className="overflow-hidden rounded-[28px] border border-[#2775CA]/15 bg-[#F6F9FE] shadow-[0_20px_70px_-35px_rgba(39,117,202,0.16)]">
-              <div className="flex items-center gap-2 border-b border-[#2775CA]/10 px-6 py-4"><span className="h-1.5 w-1.5 rounded-full bg-[#2775CA]" /><span className="text-[11px] font-medium text-[#5C5C5D]">Start in a new chat with your goal</span></div>
-              <div className="p-6 md:p-8"><p className="mb-3 text-[10px] font-semibold tracking-[0.16em] text-[#1D5FA8]">START WITH</p><p className="text-[23px] font-medium tracking-tight">"Use METRON. Show status"</p><div className="my-7 h-px bg-[#2775CA]/10" />
-                {[
-                  ['metron-policy', 'Goals, financial rules & accounting'],
-                  ['metron-email', 'Customer email through your AI app'],
-                  ['metron-invoice', 'Private PDFs from posted invoices'],
-                  ['metron-payment', 'Check Circle payment confirmations'],
-                ].map(([name, detail]) => <div key={name} className="mb-5 flex items-start gap-3 last:mb-0"><Check size={14} className="mt-1 shrink-0 text-[#2775CA]" /><div><code className="text-[13px] font-semibold">{name}</code><p className="mt-0.5 text-[11px] text-[#5C5C5D]">{detail}</p></div></div>)}
-              </div>
-            </div>
+            <InstallChat />
             <p className="mt-5 text-[11px] leading-relaxed text-[#5C5C5D]">Use ChatGPT desktop with local execution or local Codex chat. Python 3.11+ runs locally; Circle CLI must be reachable by METRON. Node.js 20.18.2+ is required. Invoice PDFs also need Bun.</p>
             <a href={installation} className="button mt-5 inline-flex items-center gap-2 text-[13px] font-semibold text-[#1D5FA8]">Read the installation guide <ArrowRight size={13} /></a>
           </Reveal>

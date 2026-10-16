@@ -161,3 +161,46 @@ a, button { touch-action: manipulation; }
   .button, .integration-icon { transition: background-color 150ms ease; }
   .button:hover, .button:active, .integration-chip:hover .integration-icon { transform: none; }
 }
+
+.install-chat { overflow: hidden; border: 1px solid rgb(39 117 202 / 15%); border-radius: 28px; background: #fff; box-shadow: 0 20px 70px -35px rgb(39 117 202 / 16%); }
+.install-chat__header { display: flex; align-items: center; gap: 12px; padding: 20px 24px; border-bottom: 1px solid #e9f0f9; }
+.install-chat__avatar { display: grid; place-items: center; width: 36px; height: 36px; flex-shrink: 0; border-radius: 12px; color: #2775ca; background: #e5f0ff; }
+.install-chat__title { font-size: 13px; font-weight: 600; }
+.install-chat__subtitle { margin-top: 3px; color: #5c5c5d; font-size: 10px; }
+.install-chat__pause { display: grid; place-items: center; flex-shrink: 0; width: 32px; height: 32px; margin-left: auto; border-radius: 50%; color: #1d5fa8; background: #f3f8ff; cursor: pointer; transition: transform 160ms cubic-bezier(0.23,1,0.32,1); }
+.install-chat__pause:active { transform: scale(0.97); }
+.install-chat__pause:focus-visible, .install-chat__viewport:focus-visible { outline: 2px solid #2775ca; outline-offset: -3px; }
+.install-chat__viewport { height: 390px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #cddff5 transparent; background: linear-gradient(180deg,#f9fbff,#fff); }
+.install-chat__messages { display: flex; flex-direction: column; gap: 20px; min-height: 100%; padding: 24px; opacity: 1; transition: opacity 240ms ease; }
+.install-chat__messages[data-fading="true"] { opacity: 0; }
+.install-chat__message { max-width: 88%; transition: opacity 240ms ease, transform 240ms cubic-bezier(0.23,1,0.32,1); }
+.install-chat__message--user { align-self: flex-end; }
+.install-chat__message--agent { align-self: flex-start; }
+.install-chat__speaker { display: block; margin: 0 4px 6px; color: #737984; font-size: 10px; }
+.install-chat__message--user .install-chat__speaker { text-align: right; }
+.install-chat__bubble { padding: 13px 16px; border: 1px solid #e1eaf5; border-radius: 18px 18px 18px 5px; background: #fff; color: #354255; font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
+.install-chat__message--user .install-chat__bubble { border-color: #2775ca; border-radius: 18px 18px 5px 18px; background: #2775ca; color: #fff; }
+.install-chat__skill { display: inline-flex; align-items: center; gap: 5px; margin-bottom: 8px; padding: 2px 7px; border-radius: 6px; background: #edf5ff; color: #1d5fa8; font-size: 10px; font-weight: 600; }
+.install-chat__caret { display: inline-block; width: 2px; height: 13px; margin-left: 2px; vertical-align: -2px; background: currentColor; }
+.install-chat__typing { display: flex; align-items: center; gap: 4px; min-height: 21px; padding: 0 3px; }
+.install-chat__typing i { width: 5px; height: 5px; border-radius: 50%; background: #2775ca; animation: install-chat-dot 900ms ease infinite alternate; }
+.install-chat__typing i:nth-child(2) { animation-delay: 150ms; }
+.install-chat__typing i:nth-child(3) { animation-delay: 300ms; }
+.install-chat[data-paused="true"] .install-chat__typing i { animation-play-state: paused; }
+.install-chat__footer { display: flex; align-items: center; justify-content: center; gap: 7px; padding: 13px; border-top: 1px solid #e9f0f9; color: #737984; font-size: 10px; }
+.install-chat__footer > span { width: 4px; height: 4px; border-radius: 50%; background: #2775ca; }
+@starting-style {
+  .install-chat__message--user { opacity: 0; transform: translateX(16px); }
+  .install-chat__message--agent { opacity: 0; transform: translateX(-16px); }
+}
+@keyframes install-chat-dot { from { opacity: 0.3; transform: translateY(0); } to { opacity: 1; transform: translateY(-3px); } }
+@media (max-width: 480px) {
+  .install-chat__header { gap: 8px; padding: 16px; }
+  .install-chat__messages { padding: 20px 16px; }
+  .install-chat__message { max-width: 94%; }
+  .install-chat__bubble { padding: 12px 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .install-chat__message, .install-chat__messages, .install-chat__pause { transition: none; transform: none; opacity: 1; }
+  .install-chat__typing i { animation: none; }
+}
