@@ -1,6 +1,6 @@
 # V3 activation, dispatch and evidence hardening
 
-This follow-up reviews PR #22 baseline `9c73dc9`. All three findings reproduce: disabled V3 returned SKIPPED without a durable source, one invoice hook dispatched ten records when two bundles were pending, and a transient pre-read made an unsent row permanently UNKNOWN. The three regression tests failed before the fixes. The approved immutable contract architecture, ABI and runtime bytes are unchanged.
+This follow-up reviews PR #22 baseline `9c73dc9`. All three findings reproduce: disabled V3 returned SKIPPED without a durable source, one invoice hook dispatched ten records when two bundles were pending, and a transient pre-read made an unsent row permanently UNKNOWN. The three regression tests failed before the fixes. The approved immutable contract architecture, ABI and reviewed runtime bytes are unchanged. Build settings pin EVM target Osaka, IPFS metadata hashing and the exact historical remapping set with auto-detection disabled. CI exposed metadata dependence on nested submodule discovery: removing auto-detected remappings changed only CBOR/IPFS metadata, not executable runtime. Explicit settings now preserve the originally reviewed full bytecode across hosts; no dependency or contract behavior is added.
 
 ## Transition and activation
 
