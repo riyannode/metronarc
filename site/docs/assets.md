@@ -12,17 +12,17 @@ Edit these defaults in `src/styles.css`; no component or dependency change is re
 
 ```css
 .hero-backdrop {
-  --hero-blur: 0px;
-  --hero-opacity: 1;
-  --hero-saturation: 0.9;
-  --hero-brightness: 0.85;
+  --hero-blur: 0.5px;
+  --hero-opacity: 0.9;
+  --hero-saturation: 0.85;
+  --hero-brightness: 0.8;
 }
 
 .editorial-image {
-  --editorial-blur: 0.5px;
-  --editorial-opacity: 1;
-  --editorial-saturation: 0.9;
-  --editorial-brightness: 0.85;
+  --editorial-blur: 1px;
+  --editorial-opacity: 0.9;
+  --editorial-saturation: 0.85;
+  --editorial-brightness: 0.75;
 }
 ```
 

@@ -4,7 +4,7 @@ METRON's business workflow starts in an interactive chat. The agent calls METRON
 
 ## Supported hosts
 
-- **ChatGPT desktop:** you install METRON yourself from the GitHub marketplace, then use a local thread. The plugin requires local execution to reach METRON's local files and Circle CLI. A browser or remote thread cannot access another machine's files or CLI.
+- **ChatGPT desktop — NOT VERIFIED:** the documented marketplace installation and local-thread workflow still require a clean desktop acceptance test. The plugin requires local execution to reach METRON's local files and Circle CLI. A browser or remote thread cannot access another machine's files or CLI.
 - **Codex interactive chat:** the local workflow and fresh-session recovery were verified in Codex. Final deal and escalated-spend approvals in this pilot require a direct instruction in that chat.
 - **Local terminal:** use it for one-time Circle CLI setup or troubleshooting only. The terminal commands below do not replace the chat workflow.
 
@@ -46,7 +46,7 @@ If Circle CLI is missing, ask before installing it:
 npm install -g @circle-fin/cli@latest
 ```
 
-Do not reinstall an existing CLI without a reason. Check `circle --version` and `circle wallet login --help`. If help lacks `--testnet`, explain that this CLI cannot start the documented Arc Testnet login and ask before updating it. Circle's setup guide lists CLI 1.2.1 as its baseline; use the [Circle CLI package guide](https://www.npmjs.com/package/@circle-fin/cli) to verify current commands.
+Do not reinstall an existing CLI without a reason. Check `circle --version` and `circle wallet login --help`. Circle's setup guide requires CLI 1.2.1 or newer. CLI 1.2.1 accepts `--testnet` even though login help omits it; absence from help is not a reason to update. Use the [official setup guide](https://agents.circle.com/skills/setup.md) and [Circle CLI command reference](https://developers.circle.com/agent-stack/circle-cli/command-reference) to check current requirements. Ask before any update.
 
 ## Set up Circle Agent Wallet with your AI agent
 
@@ -89,7 +89,7 @@ If the user has an existing Circle account but no testnet session, ask before st
 circle wallet login <your-circle-email> --testnet
 ```
 
-Enter the OTP in the local Circle CLI prompt. Do not paste it into chat or a repository file. `circle wallet status` reports testnet and mainnet sessions separately.
+Replace `<your-circle-email>` with your Circle account email before running the command. Enter the OTP in the local Circle CLI prompt. Do not paste it into chat or a repository file. Circle's official agent guide also describes a two-step `--init` / `--request` flow; METRON uses the local interactive prompt to keep OTPs out of chat. `circle wallet status` reports testnet and mainnet sessions separately.
 
 After authentication, inspect the existing Arc Testnet wallet and its balance:
 
@@ -114,7 +114,7 @@ METRON stores `metron.sqlite`, `config.json`, and a generated `dashboard.html` u
 
 - `METRON_CIRCLE_NOT_INSTALLED`: check whether METRON's runtime can find Circle CLI, including the WSL-to-Windows adapter. Offer installation only if no usable CLI is available.
 - `METRON_CIRCLE_NOT_AUTHENTICATED`: check `circle wallet status`; use the Arc Testnet session only after confirming the account and consent steps.
-- `--testnet` is missing from CLI help: offer an update to the current Circle CLI and wait for approval.
+- `--testnet` is missing from CLI help: CLI 1.2.1 omits it from help but accepts it. Check the version and current official guide; ask before updating an older or incompatible CLI.
 - `node`, `npm`, or `circle` is missing from PATH: reopen the terminal and check whether the local runtime or WSL adapter can access it before installing another copy.
 - No interactive OTP prompt: stop and have the user complete login in the local terminal.
 

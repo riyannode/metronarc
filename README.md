@@ -4,7 +4,7 @@
 
 > An agent should earn the right to spend more capital by proving that previous spending generated revenue.
 
-METRON is a chat-operated local plugin with four skills. `metron-policy` owns economic decisions and the finance CLI; `metron-email` operates customer conversations through the host's connected email and discovery tools; `metron-invoice` renders private PDFs from posted invoice data; and `metron-payment` guides Circle verification and reconciliation. METRON's Python runtime and SQLite state run locally; Circle CLI must be callable by that runtime. The Circle adapter can bridge WSL to a visible Windows CLI. Codex interactive chat is the verified workflow; ChatGPT desktop is configured for local execution but still needs a clean install test. Browser/cloud ChatGPT and other hosts are not verified. METRON does not bundle email transport, host an LLM, provide an MCP server, or run a remote backend.
+METRON is a chat-operated local plugin with four skills. `metron-policy` owns economic decisions and the finance CLI; `metron-email` operates customer conversations through the host's connected email and discovery tools; `metron-invoice` renders private PDFs from posted invoice data; and `metron-payment` guides Circle verification and reconciliation. METRON's Python runtime and SQLite state run locally; Circle CLI must be callable by that runtime. The Circle adapter can bridge WSL to a visible Windows CLI. Codex interactive chat is the verified workflow; ChatGPT desktop installation and local-thread execution remain **NOT VERIFIED** pending a clean desktop test. Browser/cloud ChatGPT and other hosts are not verified. METRON does not bundle email transport, host an LLM, provide an MCP server, or run a remote backend.
 
 ```mermaid
 flowchart LR

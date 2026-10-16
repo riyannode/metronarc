@@ -87,7 +87,7 @@ const articles: Record<string, DocsArticle> = {
             <li>Enter <a href={repository} target="_blank" rel="noreferrer">riyannode/metronarc</a> and choose <code>master</code>.</li>
             <li>You install and enable METRON, then start a local chat. The plugin requires local execution to reach the CLI and SQLite files on that machine.</li>
           </ol>
-          <p>Codex interactive local chat is the verified workflow. ChatGPT desktop is configured for local execution but still needs a clean install test. A browser or remote chat cannot access a different machine's Circle CLI or <code>~/.metron/</code>. Other hosts are not verified.</p>
+          <p>Codex interactive local chat is the verified workflow. ChatGPT desktop installation and local-thread execution remain <strong>NOT VERIFIED</strong> pending a clean desktop test. A browser or remote chat cannot access a different machine's Circle CLI or <code>~/.metron/</code>. Other hosts are not verified.</p>
         </>,
       },
       {
@@ -113,13 +113,13 @@ First check the Circle CLI METRON can call, including its WSL-to-Windows adapter
           <CodeBlock label="macOS, Linux, or WSL" code={'node --version\nnpm --version\ncommand -v circle\ncircle --version\ncircle wallet login --help'} />
           <p>Node.js must be version <code>20.18.2</code> or later. If Circle CLI is missing, ask before installing it:</p>
           <CodeBlock label="Install Circle CLI if approved" code="npm install -g @circle-fin/cli@latest" />
-          <p>If <code>circle wallet login --help</code> does not show <code>--testnet</code>, the installed CLI cannot follow this Arc Testnet login path. Offer an update and wait for approval; do not reinstall an existing CLI without this reason. Check the <a href="https://www.npmjs.com/package/@circle-fin/cli" target="_blank" rel="noreferrer">Circle CLI package guide</a> for current commands.</p>
+          <p>Circle's setup guide requires CLI <code>1.2.1</code> or newer. CLI 1.2.1 accepts <code>--testnet</code> even though login help omits it; absence from help is not a reason to update. Check the <a href="https://developers.circle.com/agent-stack/circle-cli/command-reference" target="_blank" rel="noreferrer">Circle CLI command reference</a> and official setup guide for current requirements. Ask before any update.</p>
           <h3>Review Circle Terms and sign in</h3>
           <CodeBlock label="Review current Terms" code={'circle terms show --output json\ncircle terms show --init --output json'} />
           <p>Show the current Terms of Use, Privacy Policy, and notice from Circle's response. Wait for the wallet owner's explicit consent before running <code>circle terms accept</code>. If consent is declined, stop.</p>
           <p>Check <code>circle wallet status</code> first. For an existing Circle account, start the Arc Testnet session with:</p>
           <CodeBlock label="Circle CLI login" code={'circle wallet login <your-circle-email> --testnet'} />
-          <p>Enter the emailed OTP in Circle CLI's local prompt. If the host cannot open that prompt, stop and ask the user to run the command in the local terminal. Circle keeps testnet and mainnet sessions separate.</p>
+          <p>Replace <code>&lt;your-circle-email&gt;</code> with your Circle account email before running the command. Enter the emailed OTP in Circle CLI's local prompt. Circle's official agent guide also describes a two-step <code>--init</code> / <code>--request</code> flow; METRON uses the local interactive prompt to keep OTPs out of chat. If the host cannot open that prompt, stop and ask the user to run the command in the local terminal. Circle keeps testnet and mainnet sessions separate.</p>
           <h3>Check the existing wallet</h3>
           <CodeBlock label="Read-only Arc Testnet checks" code={'circle wallet status --type agent\ncircle wallet list --chain ARC-TESTNET --type agent --output json\ncircle wallet balance --address <wallet-address> --chain ARC-TESTNET --output json'} />
           <p>Use an existing wallet first. If no wallet is available, stop and ask before creating one. Check METRON's configured chain and operating wallet; change them only after the owner approves.</p>
@@ -243,7 +243,7 @@ First check the Circle CLI METRON can call, including its WSL-to-Windows adapter
       },
       {
         id: 'data-privacy', title: 'Data and privacy', content: <>
-          <p>METRON stores goals, policies, deal and invoice details, payment evidence, journal entries, and email state locally. It has no hosted backend or separate analytics service.</p>
+          <p>METRON stores goals, policies, deal and invoice details, payment evidence, journal entries, and email state locally. For email-bound deals, it also stores a short buyer-confirmation excerpt containing the payer wallet and invoice due date, plus its SHA-256 digest. It has no hosted backend or separate analytics service.</p>
           <p>The AI host, email provider, Circle, and an approved x402 service receive the data needed for their actions. METRON does not store OTPs, session tokens, private keys, or seed phrases.</p>
           <p>Records remain while you keep the local directory and its backups. Resolve outstanding or <code>UNKNOWN</code> payments before deleting them.</p>
         </>,

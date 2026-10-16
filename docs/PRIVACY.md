@@ -1,6 +1,6 @@
 # METRON Privacy Policy
 
-Last updated: 2026-10-05
+Last updated: 2026-10-16
 
 This policy describes the METRON local plugin and its command-line core. It applies when a user installs or uses METRON; it does not replace the privacy policies of the AI host, Circle, or any service provider.
 
@@ -11,6 +11,7 @@ METRON processes the information needed to apply economic policy and keep its lo
 - Revenue targets, budget and spending policies, counterparties, deal terms, invoice details, and approval decisions entered by the user or AI host.
 - Wallet and contract addresses configured by the user; transaction references, chain, amount, currency, direction, status, transaction hash, and evidence hashes returned by Circle.
 - x402 service URL, HTTP method, request-body hash, estimate, payment scheme, seller, and result. For an approved service payment, the request body and payment details are sent by Circle CLI to Circle and the selected service provider.
+- For email-bound deals, a short buyer-confirmation excerpt containing the payer wallet and invoice due date, with its SHA-256 digest and source message/thread identifiers. Full raw email bodies are not stored.
 - Local configuration and a generated read-only dashboard derived from the ledger.
 
 METRON does not collect email passwords, OTPs, Circle session tokens, private keys, seed phrases, or AI-host credentials. The `metron-email` skill sends and reads customer email through the host's connected email provider; METRON does not bundle an email transport.

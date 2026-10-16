@@ -4,7 +4,7 @@ test('navigation and CTAs resolve to real sections and documentation', async ({ 
   await page.goto('/')
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Give AI Agents Control of Your Business')
   const referenceFont = await page.locator('#how-title').evaluate(element => ({ family: getComputedStyle(element).fontFamily, weight: getComputedStyle(element).fontWeight }))
-  for (const heading of [page.getByRole('heading', { level: 1 }), page.locator('#integrations-title'), page.locator('#install-title'), page.locator('#faq-title'), page.getByRole('link', { name: 'METRON home', exact: true }), page.locator('footer').getByRole('link', { name: 'METRON', exact: true })]) {
+  for (const heading of [page.getByRole('heading', { level: 1 }), page.locator('#integrations-title'), page.locator('#install-title'), page.locator('#faq-title'), page.getByRole('link', { name: 'Metron home', exact: true }), page.locator('footer').getByRole('link', { name: 'Metron', exact: true })]) {
     await expect(heading).toHaveCSS('font-family', referenceFont.family)
     await expect(heading).toHaveCSS('font-weight', referenceFont.weight)
   }
@@ -16,7 +16,7 @@ test('navigation and CTAs resolve to real sections and documentation', async ({ 
   await expect.poll(() => mainNavigation.evaluate(element => Math.round(element.getBoundingClientRect().top))).toBe(10)
   await expect(brandLinks).toHaveCount(2)
   for (const link of await brandLinks.all()) {
-    await expect(link).toHaveText('METRON')
+    await expect(link).toHaveText('Metron')
     await expect(link.locator('img')).toHaveAttribute('src', '/brand/metron-mark.png')
   }
   await expect(page.locator('#install-title')).toHaveText('One Plugin. Run Your Business')
