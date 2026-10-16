@@ -44,7 +44,7 @@ export default function Hero() {
           <motion.a href="#install" initial={{ opacity: 0, transform: reduced ? 'none' : 'translateY(10px)' }} animate={{ opacity: 1, transform: 'none' }} transition={{ delay: reduced ? 0 : 0.8 }} className="button primary-cta flex h-14 w-full items-center justify-center gap-3 rounded-full bg-[#2775CA] px-8 font-bold text-white sm:w-auto">Install METRON <ArrowRight size={18} /></motion.a>
           <motion.a href="#how-it-works" initial={{ opacity: 0, transform: reduced ? 'none' : 'translateY(10px)' }} animate={{ opacity: 1, transform: 'none' }} transition={{ delay: reduced ? 0 : 0.9 }} className="button secondary-cta flex h-14 w-full items-center justify-center gap-3 rounded-full border border-[#161716]/20 bg-white/30 px-8 font-semibold backdrop-blur-md sm:w-auto"><Play size={18} fill="currentColor" className="ml-0.5" /> See How It Works</motion.a>
         </div>
-        <p className="mt-6 flex items-center justify-center gap-2 text-[11px] text-[#65758B]"><ShieldCheck size={13} className="text-[#1D5FA8]" /> The Economic Operating Layer for AI Agents</p>
+        <p className="mt-6 flex items-center justify-center gap-2 border-[#fdfeff] text-[11px] text-[#131415]"><ShieldCheck size={13} className="text-[#1D5FA8]" /> The Economic Operating Layer for AI Agents</p>
       </div>
       <Dashboard />
     </section>

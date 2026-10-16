@@ -323,10 +323,12 @@ test('image effects use configured defaults and can be changed independently wit
     await page.goto('/')
     const hero = page.locator('.hero-backdrop img')
     const editorial = page.locator('.editorial-image')
-    await expect(hero).toHaveCSS('filter', 'blur(0px) saturate(0.9) brightness(0.85)')
-    await expect(editorial).toHaveCSS('filter', 'blur(0.5px) saturate(0.9) brightness(0.85)')
+    await expect(hero).toHaveCSS('filter', 'blur(0.5px) saturate(0.85) brightness(0.8)')
+    await expect(editorial).toHaveCSS('filter', 'blur(1px) saturate(0.85) brightness(0.75)')
+    await expect(page.locator('.hero-copy > p:last-child')).toHaveCSS('color', 'rgb(19, 20, 21)')
+    await expect(page.locator('.hero-copy > p:last-child')).toHaveCSS('border-top-color', 'rgb(253, 254, 255)')
     for (const image of [hero, editorial]) {
-      await expect(image).toHaveCSS('opacity', '1')
+      await expect(image).toHaveCSS('opacity', '0.9')
     }
     const geometry = await page.locator('.hero-backdrop img, .editorial-image').evaluateAll(images => images.map(image => {
       const { width, height } = image.getBoundingClientRect()
@@ -341,8 +343,8 @@ test('image effects use configured defaults and can be changed independently wit
     })
     await expect(hero).toHaveCSS('filter', 'blur(4px) saturate(0.6) brightness(0.95)')
     await expect(hero).toHaveCSS('opacity', '0.8')
-    await expect(editorial).toHaveCSS('filter', 'blur(0.5px) saturate(0.9) brightness(0.85)')
-    await expect(editorial).toHaveCSS('opacity', '1')
+    await expect(editorial).toHaveCSS('filter', 'blur(1px) saturate(0.85) brightness(0.75)')
+    await expect(editorial).toHaveCSS('opacity', '0.9')
     await editorial.evaluate(element => {
       element.style.setProperty('--editorial-blur', '5px')
       element.style.setProperty('--editorial-opacity', '0.6')
