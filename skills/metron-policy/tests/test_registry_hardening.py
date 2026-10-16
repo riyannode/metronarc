@@ -211,10 +211,12 @@ class RegistryHardeningTest(unittest.TestCase):
         with self.assertRaises(RegistryError): registry.link(self.db, spend['id'], revenue['id'], {'fulfillment_id': fulfillment['id'], 'customer_artifact_path': str(path)})
 
     def test_service_hook_captures_output_even_while_registry_is_disabled(self):
-        spend = self.spend()
+        intent_id = self.spend(prepare=False)
         config = store.read_config(); config['registry_v3_enabled'] = False; store.write_config(config)
         before = self.financial_snapshot()
-        run.registry_after_spend(self.db, spend['source_entity_id'], {'body': 'synthetic paid response'})
+        result = run.registry_after_spend(self.db, intent_id, {'body': 'synthetic paid response'})
+        self.assertEqual(result['status'], 'DEFERRED')
+        self.assertIn('fulfillment_id', result)
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM registry_v3_fulfillments').fetchone()[0], 1)
         self.assertEqual(self.financial_snapshot(), before)
 

@@ -50,7 +50,7 @@ class RegistryV3Test(unittest.TestCase):
         finance.reconcile_invoice(self.db, invoice, circle.normalize_transaction(record, receipt))
         return registry.record_revenue(self.db, invoice, 100000) if prepare else invoice
 
-    def spend(self, suffix='1', wallet=PAYER):
+    def spend(self, suffix='1', wallet=PAYER, prepare=True):
         self.activate(wallet)
         intent = self.create_intent()
         record = incoming_circle_record()
@@ -61,7 +61,7 @@ class RegistryV3Test(unittest.TestCase):
         evidence = circle.normalize_transaction(record, receipt)
         evidence['direction'] = 'OUT'
         finance.record_spend_result(self.db, intent, evidence)
-        return registry.record_spend(self.db, intent)
+        return registry.record_spend(self.db, intent) if prepare else intent
 
     def chain(self):
         state = {}
@@ -386,10 +386,19 @@ class RegistryV3Test(unittest.TestCase):
         schema = 'metron.attribution/1'
         payload = {'kind': 'RELATIONSHIP', 'context': first['payload']['context'], 'data': data,
                    'schema': schema, 'schema_hash': registry.schema_hash(schema), 'type_hash': label('SUPPORTS'), 'historical': False}
+        attribution = {'schema': 'metron.attribution-evidence/1', 'from_fact': data['from_fact'], 'to_fact': data['to_fact'],
+                       'fulfillment': {'schema': 'metron.x402-fulfillment/1',
+                                       'provider_ref': first['payload']['data']['source']['provider_ref'],
+                                       'request_hash': label('synthetic-request'), 'service_url_hash': label('synthetic-url'),
+                                       'method': 'GET', 'response_sha256': label('synthetic-response'), 'response_bytes': '10',
+                                       'capture_source': 'CIRCLE_CLI_RESPONSE'},
+                       'customer_artifact_sha256': label('synthetic-work'), 'customer_artifact_bytes': '10',
+                       'context_commitment': label('synthetic-context')}
+        data['basis']['evidence_hash'] = digest('METRON_ATTRIBUTION_EVIDENCE_V3', attribution)
         record_hash, content_hash = registry_receipts.seal(payload)
         binding = {'payload': payload, 'record_hash': record_hash, 'content_hash': content_hash,
                    'idempotency_key': dispatch_key(payload['context'], record_hash),
-                   'status': 'PENDING', 'provider_tx_ref': None, 'tx_hash': None, 'readback': None,
+                   'status': 'PENDING', 'provider_tx_ref': None, 'tx_hash': None, 'readback': None, 'attribution': attribution,
                    'facts': [{key: item[key] for key in ['record_hash', 'content_hash', 'payload']} for item in [first, second]]}
         receipt = {'schema': 'metron.provenance-receipt/3', 'binding': binding, 'receipt_hash': digest('METRON_RECEIPT_V3', binding)}
         with self.assertRaisesRegex(RegistryError, 'METRON_REGISTRY_RECEIPT_INVALID'):
