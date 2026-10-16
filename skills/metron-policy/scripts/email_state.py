@@ -167,7 +167,7 @@ def _reconciled_recovery_evidence(db: sqlite3.Connection, invoice_id: str, deal_
     import registry
 
     invoice = db.execute(
-        "SELECT i.*,d.status AS deal_status,d.goal_id,d.terms_json FROM sales_invoices i "
+        "SELECT i.*,d.status AS deal_status,d.terms_json FROM sales_invoices i "
         "JOIN deals d ON d.id=i.deal_id WHERE i.id=? AND d.id=?",
         (invoice_id, deal_id),
     ).fetchone()
@@ -287,8 +287,14 @@ def _reconciled_recovery_evidence(db: sqlite3.Connection, invoice_id: str, deal_
             receipts = registry.receipts(db, record["id"])
         except (registry.RegistryError, ValueError, KeyError, TypeError):
             raise finance.DomainError("METRON_EMAIL_RECOVERY_NOT_READY") from None
-        if not any(item["binding"]["status"] == "CONFIRMED"
+        if not any(item["binding"]["payload"] == json.loads(record["payload_json"])
+                   and item["binding"]["record_hash"] == record["record_hash"]
+                   and item["binding"]["content_hash"] == record["content_hash"]
+                   and item["binding"]["idempotency_key"] == record["idempotency_key"]
+                   and item["binding"]["status"] == record["status"] == "CONFIRMED"
+                   and item["binding"]["provider_tx_ref"] == record["provider_tx_ref"]
                    and item["binding"]["tx_hash"] == record["tx_hash"]
+                   and item["binding"]["readback"] == json.loads(record["readback_json"])
                    and item["binding"]["readback"].get("matched") is True for item in receipts):
             raise finance.DomainError("METRON_EMAIL_RECOVERY_NOT_READY")
     return {
