@@ -154,6 +154,8 @@ test('documentation routes load directly, refresh, and navigate between articles
     await expect(sidebar.locator('[aria-current="page"]')).toHaveCount(1)
     await expect(sidebar.locator('[aria-current="page"]')).toHaveAttribute('href', route)
     await expect(page.locator('.docs-toc a')).toHaveCount(await page.locator('.docs-reader__section').count())
+    const websiteCode = (await page.locator('.docs-code-block pre code').allTextContents()).join('\n')
+    expect(websiteCode).not.toMatch(/python3 .*run\.py|goal-create|invoice-create|payment-reconcile/)
 
     for (const heading of [page.getByRole('heading', { level: 1 }), ...await page.locator('.docs-reader__section h2').all()]) {
       await expect(heading).toHaveCSS('font-family', reference.family)
@@ -175,23 +177,27 @@ test('documentation routes load directly, refresh, and navigate between articles
 
 test('documentation layout and copy controls work on desktop and mobile', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const requiredPrompt = 'Run curl -sL https://agents.circle.com/skills/setup.md, read the official setup instructions, then help me install and connect Circle Agent Wallet to METRON on Arc Testnet. Check my existing installation and wallets first. Guide me through any required authentication and ask for my approval before making changes.'
   for (const width of [390, 768, 1280]) {
     await page.setViewportSize({ width, height: 900 })
     await page.goto('/docs/installation')
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
-    const copy = page.getByRole('button', { name: 'Copy shell code' }).first()
+    const copy = page.getByRole('button', { name: 'Copy Circle setup prompt' })
     await copy.click()
-    await expect(page.getByRole('button', { name: 'Copied shell code' }).first()).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Copied Circle setup prompt' })).toBeVisible()
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain(requiredPrompt)
+    await expect(page.locator('.docs-reader')).toContainText('First login can create wallets')
+    await expect(page.locator('.docs-reader')).toContainText('Enter the emailed OTP in Circle CLI\'s local prompt')
 
     if (width <= 1100) {
       const toc = page.locator('.docs-toc-mobile')
       await toc.locator('summary').click()
-      await toc.getByRole('link', { name: 'Set up Circle' }).click()
-      await expect(page).toHaveURL(/#circle-setup$/)
+      await toc.getByRole('link', { name: 'Set up Circle Agent Wallet with your AI agent' }).click()
+      await expect(page).toHaveURL(/#circle-agent-wallet$/)
     } else {
-      await page.locator('.docs-toc').getByRole('link', { name: 'Set up Circle' }).click()
-      await expect(page).toHaveURL(/#circle-setup$/)
+      await page.locator('.docs-toc').getByRole('link', { name: 'Set up Circle Agent Wallet with your AI agent' }).click()
+      await expect(page).toHaveURL(/#circle-agent-wallet$/)
     }
   }
 })

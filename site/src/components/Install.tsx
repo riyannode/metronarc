@@ -3,10 +3,10 @@ import { installation, repository } from '../content'
 import Reveal from './Reveal'
 
 const installSteps = [
-  ['Add the GitHub marketplace', <>Open Plugins and choose <strong>Add marketplace from a repository</strong>. Add <a className="text-[#1D5FA8] underline decoration-[#2775CA]/30 underline-offset-4" href={repository} target="_blank" rel="noreferrer">riyannode/metronarc</a> and choose branch <code>master</code>.</>],
-  ['Install and enable METRON', <>Select METRON in the marketplace, install and enable it, then open a new chat and ask <strong>"Set up METRON."</strong></>],
-  ['Configure Circle Agent Wallet', <>Read and accept Circle's terms yourself. Sign in with the wallet owner's email and one-time code. Set <code>ARC-TESTNET</code>, choose your operating wallet, and fund it directly.</>],
-  ['Set policy and start operating', <>Set a revenue goal, starting budget, daily and per-action spending limits, minimum wallet balance, minimum deal size, and share of earnings to reinvest. Then use the four skills below.</>],
+  ['Add the GitHub marketplace', <>In ChatGPT desktop, open Plugins and choose <strong>Add marketplace from a repository</strong>. Add <a className="text-[#1D5FA8] underline decoration-[#2775CA]/30 underline-offset-4" href={repository} target="_blank" rel="noreferrer">riyannode/metronarc</a> and choose branch <code>master</code>.</>],
+  ['Install and enable METRON', <>Select METRON, install and enable it, then start a <strong>local chat</strong>. The plugin needs local execution to reach Circle CLI and your METRON files.</>],
+  ['Set up Circle Agent Wallet', <>Use the <a className="text-[#1D5FA8] underline decoration-[#2775CA]/30 underline-offset-4" href={installation}>AI setup prompt</a>. Review Circle's terms, enter OTP in the local CLI, and check for an existing <code>ARC-TESTNET</code> wallet first.</>],
+  ['Set policy and start operating', <>Ask METRON in chat to prepare your revenue goal and financial rules. Review each value before saving. No wallet funding or payment is part of setup.</>],
 ] as const
 
 export default function Install() {
@@ -32,7 +32,7 @@ export default function Install() {
                 ].map(([name, detail]) => <div key={name} className="mb-5 flex items-start gap-3 last:mb-0"><Check size={14} className="mt-1 shrink-0 text-[#2775CA]" /><div><code className="text-[13px] font-semibold">{name}</code><p className="mt-0.5 text-[11px] text-[#5C5C5D]">{detail}</p></div></div>)}
               </div>
             </div>
-            <p className="mt-5 text-[11px] leading-relaxed text-[#5C5C5D]">You need a supported AI app, Python 3.11+, and Circle CLI with Node.js 20.18.2+. Invoice PDFs also need Bun. Private repository access is required.</p>
+            <p className="mt-5 text-[11px] leading-relaxed text-[#5C5C5D]">Use ChatGPT desktop with local execution or local Codex chat. Python 3.11+ runs locally; Circle CLI must be reachable by METRON. Node.js 20.18.2+ is required. Invoice PDFs also need Bun.</p>
             <a href={installation} className="button mt-5 inline-flex items-center gap-2 text-[13px] font-semibold text-[#1D5FA8]">Read the installation guide <ArrowRight size={13} /></a>
           </Reveal>
         </div>

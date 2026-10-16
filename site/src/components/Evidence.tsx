@@ -3,7 +3,7 @@ export default function Evidence() {
     <section id="evidence" aria-label="METRON editorial image" className="relative overflow-hidden bg-white">
       <img
         src="/images/metron-editorial.webp"
-        alt="A seated man surrounded by vintage computer screens and research notes"
+        alt="An empty studio with vintage computer screens and research notes"
         width={1672}
         height={941}
         loading="lazy"

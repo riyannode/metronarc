@@ -12,7 +12,7 @@ const navGroups: DocsNavGroup[] = [
   { label: 'Reference', items: [{ href: '/docs/architecture', label: 'Architecture & Security' }] },
 ]
 
-function CodeBlock({ label, code }: { label: string; code: string }) {
+function CodeBlock({ label, code, format = 'code' }: { label: string; code: string; format?: 'code' | 'prompt' }) {
   const [state, setState] = useState<'ready' | 'copied' | 'failed'>('ready')
 
   const copy = async () => {
@@ -27,10 +27,10 @@ function CodeBlock({ label, code }: { label: string; code: string }) {
   const status = state === 'copied' ? 'Copied' : state === 'failed' ? 'Copy failed' : 'Copy'
 
   return (
-    <div className="docs-code-block">
+    <div className={`docs-code-block${format === 'prompt' ? ' docs-code-block--prompt' : ''}`}>
       <div className="docs-code-block__bar">
         <span>{label}</span>
-        <button type="button" onClick={() => void copy()} aria-label={`${status} ${label} code`} title={status}>
+        <button type="button" onClick={() => void copy()} aria-label={`${status} ${label}`} title={status}>
           {state === 'copied' ? <Check size={15} /> : <Copy size={15} />}
           <span aria-live="polite">{status}</span>
         </button>
@@ -70,45 +70,73 @@ const articles: Record<string, DocsArticle> = {
   '/docs/installation': {
     label: 'Getting started',
     title: 'Install and set up METRON',
-    intro: 'Install the GitHub marketplace, connect Circle, then create a goal with your own limits.',
+    intro: 'Install METRON, connect Circle Agent Wallet, then set up your goal in chat.',
     sections: [
       {
         id: 'requirements', title: 'Requirements', content: <ul>
-          <li>Python 3.11 or later.</li>
-          <li>Circle CLI. The official CLI requires Node.js 20.18.2 or later.</li>
-          <li>Bun to render invoice PDFs. Foundry is only needed for contract build and tests.</li>
+          <li>ChatGPT desktop with local execution, or a local Codex chat. METRON runs its Python code and <code>~/.metron/</code> locally; Circle CLI must be callable by that runtime.</li>
+          <li>Python 3.11 or later. Circle CLI needs Node.js 20.18.2 or later and npm.</li>
+          <li>Bun is only needed to render invoice PDFs. Foundry is only needed for contract build and tests.</li>
+          <li>The repository is private. GitHub access is required to install it.</li>
         </ul>,
       },
       {
         id: 'install-plugin', title: 'Install the plugin', content: <>
-          <p>The repository is private. You need an account that already has access.</p>
           <ol>
             <li>In ChatGPT desktop, open Plugins and choose <strong>Add marketplace from a repository</strong>.</li>
             <li>Enter <a href={repository} target="_blank" rel="noreferrer">riyannode/metronarc</a> and choose <code>master</code>.</li>
-            <li>Install and enable METRON, then open a fresh chat and ask <code>Set up METRON</code>.</li>
+            <li>You install and enable METRON, then start a local chat. The plugin requires local execution to reach the CLI and SQLite files on that machine.</li>
           </ol>
-          <p>The npm setup tool is not published yet.</p>
+          <p>Codex interactive local chat is the verified workflow. ChatGPT desktop is configured for local execution but still needs a clean install test. A browser or remote chat cannot access a different machine's Circle CLI or <code>~/.metron/</code>. Other hosts are not verified.</p>
         </>,
       },
       {
-        id: 'circle-setup', title: 'Set up Circle', content: <>
-          <p>Review Circle's current Terms before accepting them. The wallet owner signs in through Circle CLI and completes the email OTP there. Do not put the OTP in METRON input or repository files.</p>
-          <p>METRON defaults to <code>ARC-TESTNET</code>. Choose the operating wallet and fund it directly.</p>
-          <CodeBlock label="shell" code={'python3 -B skills/metron-policy/scripts/run.py circle-terms-status'} />
+        id: 'circle-agent-wallet', title: 'Set up Circle Agent Wallet with your AI agent', content: <>
+          <p>After you install the plugin, copy this prompt into a ChatGPT desktop local chat or local Codex chat. The agent reads Circle's current guide and checks the local runtime METRON uses.</p>
+          <CodeBlock format="prompt" label="Circle setup prompt" code={`Run curl -sL https://agents.circle.com/skills/setup.md, read the official setup instructions, then help me install and connect Circle Agent Wallet to METRON on Arc Testnet. Check my existing installation and wallets first. Guide me through any required authentication and ask for my approval before making changes.
+
+First check the Circle CLI METRON can call, including its WSL-to-Windows adapter when relevant. Do not install another copy if the existing CLI is reachable. Before a first login for an unknown email, explain that Circle may provision Agent wallets on supported chains and wait for my approval. Do not accept Circle Terms, install or update software, install Circle skills, create or change wallets, fund, deposit, transfer, or make payments without my explicit approval. Do not ask me to enter an OTP, session token, private key, or seed phrase in chat. Use Circle CLI's local interactive OTP prompt; if this host cannot provide it, stop and show me the manual step. If this chat has no terminal on METRON's machine, do not claim to install or inspect it. Finish with read-only checks for Circle status, the ARC-TESTNET wallet, METRON's configured chain and operating wallet, and wallet readiness.`} />
+          <p><strong>First login can create wallets.</strong> Circle says a first login for a new email provisions Agent wallets across supported chains. Confirm the account exists before login; if it is new or unclear, stop and ask first. Do not run <code>circle wallet create</code> automatically.</p>
+          <ul>
+            <li>Review the live Terms URLs and notice. Accept only after the wallet owner explicitly agrees.</li>
+            <li>Enter email OTP in Circle CLI's local interactive prompt, never in chat or a file.</li>
+            <li>Check the existing wallet and balance on <code>ARC-TESTNET</code>. Do not fund or transact as part of setup.</li>
+          </ul>
+          <p><a href="https://agents.circle.com/skills/setup.md" target="_blank" rel="noreferrer">Circle's official setup guide</a></p>
         </>,
       },
       {
-        id: 'initialize', title: 'Initialize and create a goal', content: <>
-          <p>Initialize only when local state does not exist. Then set each budget and spending value in a JSON goal file. Amounts are exact decimal strings.</p>
-          <CodeBlock label="shell" code={'python3 -B skills/metron-policy/scripts/run.py init\npython3 -B skills/metron-policy/scripts/run.py status'} />
-          <CodeBlock label="shell" code={'python3 -B skills/metron-policy/scripts/run.py goal-create --input goal.json'} />
-          <p>Set the revenue target, operating budget, daily and per-action limits, minimum wallet balance, minimum deal amount, and reinvestment share. METRON does not supply monetary defaults.</p>
+        id: 'manual-setup', title: 'Manual setup', content: <>
+          <p>You install and enable the plugin in ChatGPT. Use a local terminal only for Circle setup or troubleshooting. Windows and WSL have separate PATHs and CLI installs. METRON can bridge from WSL to a visible Windows Circle CLI through its Windows Node runtime; check that path before suggesting another install.</p>
+          <h3>Check Node.js and Circle CLI</h3>
+          <CodeBlock label="Windows PowerShell" code={'node --version\nnpm --version\nGet-Command circle -ErrorAction SilentlyContinue\ncircle --version\ncircle wallet login --help'} />
+          <CodeBlock label="macOS, Linux, or WSL" code={'node --version\nnpm --version\ncommand -v circle\ncircle --version\ncircle wallet login --help'} />
+          <p>Node.js must be version <code>20.18.2</code> or later. If Circle CLI is missing, ask before installing it:</p>
+          <CodeBlock label="Install Circle CLI if approved" code="npm install -g @circle-fin/cli@latest" />
+          <p>If <code>circle wallet login --help</code> does not show <code>--testnet</code>, the installed CLI cannot follow this Arc Testnet login path. Offer an update and wait for approval; do not reinstall an existing CLI without this reason. Check the <a href="https://www.npmjs.com/package/@circle-fin/cli" target="_blank" rel="noreferrer">Circle CLI package guide</a> for current commands.</p>
+          <h3>Review Circle Terms and sign in</h3>
+          <CodeBlock label="Review current Terms" code={'circle terms show --output json\ncircle terms show --init --output json'} />
+          <p>Show the current Terms of Use, Privacy Policy, and notice from Circle's response. Wait for the wallet owner's explicit consent before running <code>circle terms accept</code>. If consent is declined, stop.</p>
+          <p>Check <code>circle wallet status</code> first. For an existing Circle account, start the Arc Testnet session with:</p>
+          <CodeBlock label="Circle CLI login" code={'circle wallet login <your-circle-email> --testnet'} />
+          <p>Enter the emailed OTP in Circle CLI's local prompt. If the host cannot open that prompt, stop and ask the user to run the command in the local terminal. Circle keeps testnet and mainnet sessions separate.</p>
+          <h3>Check the existing wallet</h3>
+          <CodeBlock label="Read-only Arc Testnet checks" code={'circle wallet status --type agent\ncircle wallet list --chain ARC-TESTNET --type agent --output json\ncircle wallet balance --address <wallet-address> --chain ARC-TESTNET --output json'} />
+          <p>Use an existing wallet first. If no wallet is available, stop and ask before creating one. Check METRON's configured chain and operating wallet; change them only after the owner approves.</p>
         </>,
       },
       {
-        id: 'setup-troubleshooting', title: 'If setup stops', content: <>
-          <p><code>METRON_CIRCLE_NOT_INSTALLED</code> means Circle CLI is missing. <code>METRON_CIRCLE_NOT_AUTHENTICATED</code> means the wallet owner must sign in. If Circle Terms need consent, review them and continue only after the owner agrees.</p>
-          <p>State lives under <code>~/.metron/</code>. Do not initialize over an existing ledger.</p>
+        id: 'first-goal', title: 'Create a goal in chat', content: <>
+          <p>After wallet readiness is checked, ask METRON to prepare the goal and policy in chat:</p>
+          <CodeBlock format="prompt" label="First goal prompt" code="Use METRON. Help me create a revenue goal and configure my financial policy." />
+          <p>Review the revenue target, operating budget, daily and per-action limits, minimum wallet balance, minimum deal amount, and reinvestment share before saving. This prompt does not approve a deal or payment.</p>
+        </>,
+      },
+      {
+        id: 'setup-troubleshooting', title: 'Troubleshooting', content: <>
+          <p>If <code>node</code>, <code>npm</code>, or <code>circle</code> is not found, reopen the terminal and check PATH. In WSL, check whether METRON can reach the existing Windows CLI through its adapter before suggesting another install.</p>
+          <p>If Circle reports no testnet session, check <code>circle wallet status</code> and use the <code>--testnet</code> login. Do not log out of or replace an existing account to troubleshoot.</p>
+          <p>METRON data lives under <code>~/.metron/</code>. Never initialize a replacement ledger over existing data. A remote chat without local execution cannot inspect that directory or install Circle CLI on the user's computer.</p>
         </>,
       },
     ],
@@ -128,6 +156,7 @@ const articles: Record<string, DocsArticle> = {
         id: 'deals-approval', title: 'Deals and approval', content: <>
           <p>Deals below the minimum price or with custom or legal terms need an exception before customer acceptance. Customer acceptance moves the deal to <code>PENDING_HUMAN</code>. A separate final approval is required before invoice creation.</p>
           <p>Email text and agent output do not count as approval. The current pilot uses direct operator instructions in an interactive Codex chat. This is not production-grade authorization.</p>
+          <CodeBlock format="prompt" label="Read-only chat prompt" code="Use METRON. Show my pending deals and approvals." />
         </>,
       },
       {
@@ -139,7 +168,7 @@ const articles: Record<string, DocsArticle> = {
       {
         id: 'invoices', title: 'Invoices', content: <>
           <p>The finance CLI creates and posts one invoice after final deal approval. <code>metron-invoice</code> renders the persisted invoice as a private PDF and does not change financial state.</p>
-          <CodeBlock label="shell" code={'invoice-create --id <deal-id>\ninvoice-post --id <invoice-id>\ninvoice-get --id <invoice-id>'} />
+          <CodeBlock format="prompt" label="Read-only chat prompt" code="Use METRON. Show invoice INV-000001 and the status of its linked deal." />
           <p>Issuer, customer, price, tax, due date, and wallet details must come from configuration or approved deal data. METRON does not invent them.</p>
         </>,
       },
@@ -183,10 +212,7 @@ const articles: Record<string, DocsArticle> = {
       {
         id: 'payment-troubleshooting', title: 'Unresolved payments', content: <>
           <p><code>METRON_PAYMENT_AMBIGUOUS</code>, a post-dispatch timeout, or unavailable Gateway status keeps the result at <code>UNKNOWN</code>. Use authoritative readback to reconcile it. Do not dispatch again while it is unresolved.</p>
-          <p>For an incoming invoice:</p>
-          <CodeBlock label="shell" code={'python3 -B skills/metron-policy/scripts/run.py payment-reconcile --id <invoice-id> --provider-ref <Circle-id-or-transaction-hash>'} />
-          <p>For an outgoing spend:</p>
-          <CodeBlock label="shell" code={'python3 -B skills/metron-policy/scripts/run.py payment-reconcile --id <spend-intent-id> --provider-ref <saved-Circle-reference>'} />
+          <CodeBlock format="prompt" label="Read-only chat prompt" code="Use METRON. Check the status of [invoice or spend intent] using Circle evidence. Do not reconcile or retry it; show me the evidence first." />
           <p>A provider ID is not an Arc transaction hash. Keep each evidence identifier in its own field.</p>
         </>,
       },
@@ -206,7 +232,7 @@ const articles: Record<string, DocsArticle> = {
       {
         id: 'local-state', title: 'Local state', content: <>
           <p>The SQLite database at <code>~/.metron/metron.sqlite</code> is authoritative across host sessions. Configuration and the generated dashboard also live under <code>~/.metron/</code>.</p>
-          <p>METRON does not encrypt these files. Protect the directory and its backups with your operating-system account controls.</p>
+          <p>The HTML dashboard is a local read-only snapshot, not a control panel inside ChatGPT. METRON does not encrypt these files. Protect the directory and its backups with your operating-system account controls.</p>
         </>,
       },
       {
