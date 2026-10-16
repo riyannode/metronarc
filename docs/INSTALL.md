@@ -50,6 +50,9 @@ Do not reinstall an existing CLI without a reason. Check `circle --version` and 
 
 ## Set up Circle Agent Wallet with your AI agent
 
+EconomicRegistry V3 records independent typed settlement facts and immutable optional relationships, including many-to-many attribution. Revenue never requires a spend. Circle remains payment authority and SQLite/journals remain financial truth; registry records never increase revenue or earned capital. V3 is not deployed or enabled by default. The V2 contract at `0x547552585d8d995c5063820b2950e0db52b4cab4` on Arc Testnet (chain ID `5042002`) is historical provenance, with readback only in the V3 adapter. See [V3 design and transition](REGISTRY_V3.md). Configure and fund only the Circle operating wallet for payment operations. Service terms remain operator-owned through `service-set`. Existing operators do not reinstall, log in again, create wallets or reset SQLite for V3 development.
+
+
 After you install and enable the plugin, paste this prompt into a ChatGPT desktop local thread or a local Codex chat:
 
 > Run `curl -sL https://agents.circle.com/skills/setup.md`, read the official setup instructions, then help me install and connect Circle Agent Wallet to METRON on Arc Testnet. Check my existing installation and wallets first. Guide me through any required authentication and ask for my approval before making changes.

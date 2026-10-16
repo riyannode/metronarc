@@ -164,15 +164,50 @@ def gateway_backing_eoa(response: dict, address: str) -> str:
 
 
 def registry_query(signature: str, parameters: list[str], contract: str, chain: str) -> dict:
-    return call(["contract","query",signature,*parameters,"--contract",contract,"--chain",chain])
+    allowed = {"spendRecords(address,bytes32)": 2, "revenueRecords(address,bytes32,bytes32)": 3,
+               "usedRevenueEvidence(address,bytes32)": 2}
+    if (chain != "ARC-TESTNET" or not isinstance(contract, str)
+            or contract.lower() != "0x547552585d8d995c5063820b2950e0db52b4cab4"
+            or signature not in allowed or len(parameters) != allowed[signature]
+            or not _is_evm_address(parameters[0])
+            or any(not isinstance(value, str) or not re.fullmatch(r"0x[0-9a-fA-F]{64}", value) for value in parameters[1:])):
+        raise CircleError("METRON_REGISTRY_CALL_NOT_ALLOWED")
+    return call(["contract", "query", signature, *parameters, "--contract", contract, "--chain", chain])
 
 
-def registry_record_spend(contract: str, address: str, chain: str, spend_id: str, goal_hash: str, intent_hash: str, evidence_hash: str, amount: int, idempotency_key: str) -> dict:
-    return call(["wallet","execute","recordSpend(bytes32,bytes32,bytes32,bytes32,uint256)",spend_id,goal_hash,intent_hash,evidence_hash,str(amount),"--contract",contract,"--address",address,"--chain",chain,"--idempotency-key",idempotency_key],timeout=180)
+def _registry_v3_target(contract: str, chain: str, wallet: str | None = None) -> None:
+    import store
+    config = store.read_config()
+    if (chain != "ARC-TESTNET" or config.get("registry_v3_enabled") is not True
+            or not _is_evm_address(contract) or int(contract, 16) == 0
+            or contract.lower() != str(config.get("registry_v3_address", "")).lower()
+            or contract.lower() == "0x547552585d8d995c5063820b2950e0db52b4cab4"
+            or (wallet is not None and (not _is_evm_address(wallet) or int(wallet, 16) == 0
+                or wallet.lower() != str(config.get("operating_wallet", "")).lower()))):
+        raise CircleError("METRON_REGISTRY_CALL_NOT_ALLOWED")
 
 
-def registry_record_revenue(contract: str, address: str, chain: str, spend_id: str, evidence_hash: str, amount: int, earned_capital: int, idempotency_key: str) -> dict:
-    return call(["wallet","execute","recordRevenue(bytes32,bytes32,uint256,uint256)",spend_id,evidence_hash,str(amount),str(earned_capital),"--contract",contract,"--address",address,"--chain",chain,"--idempotency-key",idempotency_key],timeout=180)
+def registry_v3_query(signature: str, parameters: list[str], contract: str, chain: str) -> dict:
+    _registry_v3_target(contract, chain)
+    allowed = {"VERSION()": 0, "facts(address,bytes32)": 2, "relationships(address,bytes32)": 2,
+               "evidenceFacts(address,bytes32)": 2}
+    if signature not in allowed or len(parameters) != allowed[signature]:
+        raise CircleError("METRON_REGISTRY_CALL_NOT_ALLOWED")
+    if parameters and (not _is_evm_address(parameters[0]) or not isinstance(parameters[1], str) or not re.fullmatch(r"0x[0-9a-fA-F]{64}", parameters[1])):
+        raise CircleError("METRON_REGISTRY_CALL_NOT_ALLOWED")
+    return call(["contract", "query", signature, *parameters, "--contract", contract, "--chain", chain])
+
+
+def registry_v3_execute(kind: str, parameters: list[str], contract: str, wallet: str, chain: str, idempotency_key: str) -> dict:
+    _registry_v3_target(contract, chain, wallet)
+    signatures = {"FACT": ("recordFact(bytes32,bytes32,bytes32,bytes32,bytes32)", 5),
+                  "RELATIONSHIP": ("recordRelationship(bytes32,bytes32,bytes32,bytes32,bytes32,bytes32)", 6)}
+    if (kind not in signatures or len(parameters) != signatures[kind][1]
+            or any(not isinstance(value, str) or not re.fullmatch(r"0x[0-9a-f]{64}", value) for value in parameters)
+            or not isinstance(idempotency_key, str) or not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", idempotency_key)):
+        raise CircleError("METRON_REGISTRY_CALL_NOT_ALLOWED")
+    return call(["wallet", "execute", signatures[kind][0], *parameters, "--contract", contract,
+                 "--address", wallet, "--chain", chain, "--amount", "0", "--idempotency-key", idempotency_key], timeout=180)
 
 
 def gateway_available_balance_atomic(response: dict) -> int:

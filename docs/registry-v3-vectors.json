@@ -1,0 +1,40 @@
+{
+  "synthetic_only": true,
+  "payload": {
+    "kind": "FACT",
+    "schema": "metron.circle-revenue/1",
+    "schema_hash": "0x2a4eab3e7038af7d3a4e1d4ec93cf846a4df862a3738d7e7d3723147ee48d22f",
+    "type_hash": "0xaa47fb48a28dba0d3b6d1bc3a52748c8a5bca90fb0518bcc009bfff9688e4515",
+    "context": {
+      "chain_id": "5042002",
+      "registry": "0x4444444444444444444444444444444444444444",
+      "wallet": "0x2222222222222222222222222222222222222222"
+    },
+    "evidence_id": "0x244a4190c222167efe52dea0bb126e191ab09a90a85db37db3998ec9381580b2",
+    "data": {
+      "source": {
+        "provider": "CIRCLE",
+        "chain_id": "5042002",
+        "asset": "0x3600000000000000000000000000000000000000",
+        "decimals": "6",
+        "amount_atomic": "22000000",
+        "direction": "IN",
+        "provider_ref": "synthetic-circle-reference",
+        "evidence_type": "CIRCLE_TRANSACTION",
+        "tx_hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "from_address": "0x1111111111111111111111111111111111111111",
+        "to_address": "0x2222222222222222222222222222222222222222",
+        "raw_evidence_hash": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "historical": true
+  },
+  "canonical_json": "{\"context\":{\"chain_id\":\"5042002\",\"registry\":\"0x4444444444444444444444444444444444444444\",\"wallet\":\"0x2222222222222222222222222222222222222222\"},\"data\":{\"source\":{\"amount_atomic\":\"22000000\",\"asset\":\"0x3600000000000000000000000000000000000000\",\"chain_id\":\"5042002\",\"decimals\":\"6\",\"direction\":\"IN\",\"evidence_type\":\"CIRCLE_TRANSACTION\",\"from_address\":\"0x1111111111111111111111111111111111111111\",\"provider\":\"CIRCLE\",\"provider_ref\":\"synthetic-circle-reference\",\"raw_evidence_hash\":\"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to_address\":\"0x2222222222222222222222222222222222222222\",\"tx_hash\":\"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}},\"evidence_id\":\"0x244a4190c222167efe52dea0bb126e191ab09a90a85db37db3998ec9381580b2\",\"historical\":true,\"kind\":\"FACT\",\"schema\":\"metron.circle-revenue/1\",\"schema_hash\":\"0x2a4eab3e7038af7d3a4e1d4ec93cf846a4df862a3738d7e7d3723147ee48d22f\",\"type_hash\":\"0xaa47fb48a28dba0d3b6d1bc3a52748c8a5bca90fb0518bcc009bfff9688e4515\"}",
+  "record_hash": "0x6f2279337c0b3b8eaf39c3d52e78690653f19fd13b662d5fcfec0ad4b3180d3f",
+  "content_hash": "0x181e66135379c654647c5555f8c3fe9e845998be232d58e6673085c5a3a51839",
+  "source_aliases": [
+    "0x244a4190c222167efe52dea0bb126e191ab09a90a85db37db3998ec9381580b2",
+    "0x32865ecea9cd92418eca89383279ceb47775ab5c6de2ae0d53dd3bf5102d155a"
+  ],
+  "dispatch_key": "d66773a5-6886-5768-b10f-0322621a8fec"
+}

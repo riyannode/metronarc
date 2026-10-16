@@ -8,6 +8,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
+from registry_schema import REGISTRY_V3_SCHEMA
+
 
 STATE_HOME = Path(os.environ.get("METRON_HOME", Path.home() / ".metron")).expanduser()
 DATABASE = STATE_HOME / "metron.sqlite"
@@ -256,6 +258,7 @@ def connect() -> sqlite3.Connection:
 def initialize() -> dict[str, str]:
     with connect() as db:
         db.executescript(SCHEMA)
+        db.executescript(REGISTRY_V3_SCHEMA)
         _migrate_email_message_events(db)
         _migrate_email_conversations(db)
         _migrate_commercial_deals(db)
