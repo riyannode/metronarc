@@ -1,6 +1,16 @@
 # EconomicRegistry V3 design
 
-Status: design finalized for local implementation; deployment and live migration require separate operator approval. Feature branch `codex/economic-registry-v3` is rebased onto master `0737dbf439c07f2ffc1bcf9984977d80e87a1219`, which includes merged landing PR #21.
+## Deployment and acceptance status
+
+| Gate | Current result |
+|---|---|
+| DEPLOYED | **PASS / source verified** on Arc Testnet (`5042002`) at [`0xd26D5148deF3Eb37a0C28CE23674f58455918D7d`](https://explorer.testnet.arc.io/address/0xd26D5148deF3Eb37a0C28CE23674f58455918D7d). |
+| ACTIVATED | **NOT ACTIVATED** in the installed Codex plugin; no live V3 configuration binding has been enabled. |
+| LIVE VERIFIED | **NOT LIVE VERIFIED**; the installed plugin's V3 end-to-end workflow has not been exercised. Deployment readback and isolated tests do not satisfy this gate. |
+
+Deployment transaction: [`0x29ad73d1da7cb7e2579660474da0da1b05c821f51f23d156cec8c57c347d85ab`](https://explorer.testnet.arc.io/tx/0x29ad73d1da7cb7e2579660474da0da1b05c821f51f23d156cec8c57c347d85ab), block `67530806`. Source commit: `407bc99f00c6d5866d7e62b7a4206ca4103f9489`; Solidity `0.8.30`, Osaka, optimizer `200` runs. The successful receipt, exact creation/runtime bytes and `VERSION()==3` were checked on two RPC providers; the explorer reports full source verification. The deployment used a separate EOA with an encrypted Foundry keystore; it did not change the existing Circle operating wallet. No V3 economic facts, relationships or historical imports were submitted.
+
+Pinned runtime SHA-256: `6d8edc24654067f3ad65973ac57eb393d827e9e10f988de02e6ffddca1a193c5`. Canonical ABI SHA-256: `f3d4f9eb17f34ec306c9dad70b4173d4478e478766b3d6c358391d9477b07e24`. The explorer reorders ABI entries; their contents match the pinned release. Existing Codex pilot PASS results concern the installed baseline, not live V3 acceptance.
 
 ## Model and trust
 
@@ -28,7 +38,7 @@ Readback validates the exact target chain/address, namespace, type, schema, evid
 
 V2 historical contract: 0x547552585d8d995c5063820b2950e0db52b4cab4 on ARC-TESTNET / 5042002. Preserve its rows, IDs, statuses and receipts; V2 readback may continue, but new V2 submissions are retired in the V3 adapter. No live database is opened or migrated during development.
 
-V3 has no assigned address. Prepare and test locally; after approval deploy a new immutable contract, verify bytecode/version/ABI/readback and namespace through the exact Circle CLI adapter, and only then explicitly run the approval-gated registry-activate operation. config-set cannot enable V3; activation checks the pinned ABI, runtime code and VERSION on Arc Testnet and binds verification to the configured wallet/address. Never point V3 at V2 or invent a placeholder public address. Final canonical address/ABI docs, skills and website copy are updated only when that approved address exists. All five website documentation routes include the V3 status and transition guidance in `site/src/components/DocsPage.tsx`; the merged landing page layout and animation remain unchanged. A final address/status update still requires approved deployment.
+V3 is deployed at the address above, but the installed Codex plugin is not activated against it. After separate operator approval, the registry-activate operation must verify chain, exact pinned runtime, ABI binding and VERSION for the existing operating wallet. config-set cannot enable V3 or bypass that verification. Never point V3 at V2. All five website documentation routes distinguish deployment, activation and live acceptance in `site/src/components/DocsPage.tsx`; no layout or animation change is required.
 
 Before any live schema transition, take an operator-controlled consistent backup, stop task-owned writers only under approval, run additive migration once and compare all financial/V2 rows and integrity before/after. Do not reconcile or replay payments. Preview historical provenance separately and get approval for exact facts. Historical 22-USDC revenue may be recorded with original Circle evidence and historical=true, without fabricating an originating spend. A historical import writes only V3 provenance; it never calls accounting or updates earned capital. Preserve ambiguous V2 records for readback and do not resubmit them to either contract automatically. Rollback disables V3 dispatch and retains all V2/V3 records; it never drops history.
 
@@ -79,19 +89,19 @@ A receipt envelope has exactly `schema="metron.provenance-receipt/3"`, `binding`
 
 [`registry-v3-vectors.json`](registry-v3-vectors.json) publishes a synthetic 22-USDC example and its complete canonical JSON, expected hashes and aliases. Its addresses/references are fixtures, not deployed addresses or historical payment evidence. Python tests reproduce all hashes; Foundry accepts the same fact ID at the synthetic namespace. Testnet identity 5042002, actual registry address and caller wallet are mandatory inputs: a pre-deployment payload must be rebuilt for the approved deployed address.
 
-## Approved deployment procedure (not executed)
+## Completed deployment and pending activation
 
-1. Freeze reviewed sources, ABI, compiler 0.8.30 and optimizer settings (200 runs); run `forge fmt --check`, `forge build`, `forge test` under `contracts/`. Export creation/runtime bytecode and their hashes. Obtain operator approval for that exact artifact, Circle wallet, Arc Testnet network and deployment gas budget. The contract requires no constructor arguments.
-2. Circle CLI 1.2.1 exposes `circle contract deploy --bytecode <approved-creation-bytecode> --address <existing-agent-wallet> --chain ARC-TESTNET --idempotency-key <persisted-deployment-key> --estimate`. Inspect the estimate, then use the same explicit target and durable deployment key for an approved actual dispatch without `--estimate`. Persist the claim before dispatch; if ambiguous, reconcile the existing deployment operation, never blindly deploy again. This is a plan, not permission to execute it.
-3. Read the actual resulting address and genuine transaction/receipt from Circle and Arc Testnet. Independently compare deployed runtime bytecode to the frozen build, successful receipt and deployment event/factory outcome. `VERSION()==3` alone cannot authenticate arbitrary code. No public address is assigned until this verification passes.
+1. **Completed:** freeze reviewed sources and ABI, run Foundry checks, and verify the compiled release using `registry_deployment.py --check-build`. The deployed contract has no constructor arguments.
+2. **Completed under operator approval:** deploy once using Foundry and the dedicated encrypted deployer keystore, nonce `0`, on Arc Testnet. A durable claim preceded dispatch. The transaction above used `505079` gas at `21000000000` native atomic units per gas, costing exactly `0.010606659` USDC. Do not redeploy to prove this result; the earlier Circle deployment proposal was not the execution path used.
+3. **Completed:** verify the successful receipt, creation input, exact pinned runtime, VERSION and full explorer source verification. The address above is the deployed target. VERSION alone does not authenticate arbitrary code, and these deployment checks do not establish installed-plugin live E2E acceptance.
 4. After separate activation approval, run `registry-activate --input <approved-file>` with `registry_address` and `operator_confirmed:true`. The read-only inspection checks chain, runtime bytes and VERSION against `skills/metron-policy/references/registry-v3-release.json`; only a match enables the address/wallet binding. It never submits backlog. Use separately approved `registry-resume --id RB3-...` to materialize and sync one captured source. Merely setting `registry_v3_enabled=true` is rejected. The adapter's exact queries are the four ABI getters; writes are the two methods above via `circle wallet execute` with explicit `--contract`, `--address`, `--chain ARC-TESTNET`, `--amount 0`, and persisted `--idempotency-key`. Zero transferred value does not eliminate gas cost. Validate actual Circle output/readback format against approved synthetic provenance first; no payment is needed for a registry acceptance test.
-5. Update the one deployment address consistently in configuration, adapters' approved deployment metadata, README, INSTALL, SECURITY, skill protocol and website docs. Publish the exact ABI/runtime hashes and deployment receipt. Existing immutable V2 metadata stays historical. No automatic install refresh or live config change is included in this feature branch.
+5. **Pending after activation:** obtain approval for the exact provenance acceptance records and gas budget, then verify actual Circle submissions, live getters and receipt bindings before marking LIVE VERIFIED. Historical imports require their own approval. Documentation of the deployed address does not change configuration, refresh the installed plugin or activate V3; immutable V2 metadata remains historical.
 
 ## Migration procedure and compatibility
 
 | Surface | V2 to V3 behavior |
 |---|---|
-| Contract / ABI | New immutable deployment; V2 ABI/source archived for historical readback. No in-place upgrade or proxy. |
+| Contract / ABI | V3 deployed at the address above; V2 readback and historical ABI documentation remain intact, with Solidity source in Git history. No in-place upgrade or proxy. |
 | SQLite | Add six V3 tables/sealing triggers and a future-evidence capture trigger; do not alter payment, invoice, deal, journal, policy or V2 registry rows. Repeated initialization is idempotent. |
 | Accounting / approval | Existing `finance.py` unchanged; Circle remains settlement authority. Recovery/import/link never re-reconciles a payment, allocates capital or creates revenue. |
 | Identity | `REG-...` and V2 preimages remain historical; new `RV3-<fact-or-relation-hash>` IDs are deployment/chain/wallet bound. No numerical ID conversion. |
@@ -99,7 +109,7 @@ A receipt envelope has exactly `schema="metron.provenance-receipt/3"`, `binding`
 | Schema evolution | Contract accepts new nonzero type/schema digests without ABI change. Add tested validating adapters/receipt handlers first; the current adapter rejects unknown schemas. |
 | Historical 22 USDC | Not imported. Exact original Circle evidence and balanced journal plus operator approval are required. Import with historical=true, independent of spend. |
 | Installed baseline | Installed Codex METRON 0.2.0 at dccb9c4 remains unchanged; previous E2E PASS does not assert V3 installation or live acceptance. |
-| Website / PR #21 | Merged PR #21 is the baseline; V3 copy is integrated into all five documentation routes and checked with the site toolchain. Final deployment address/status stays approval-gated. No landing/animation change is part of V3. |
+| Website / PR #21 | Merged PR #21 is the baseline; V3 copy is integrated into all five documentation routes and checked with the site toolchain. The deployed address/source verification are documented; installed-plugin activation and live E2E remain pending. No landing/animation change is part of V3. |
 
 Under migration approval, compare consistent pre/post snapshots of every financial and V2 row, SQLite integrity and policy totals. Apply the additive initializer only; do not reset SQLite. Preserve existing unknown transactions and exact old addresses. Preview the original invoice/payment/journal binding and the complete proposed V3 preimages; obtain approval of the historical import and any registry gas separately. `registry-recover-revenue --id <existing-invoice> --input <approved-input-file>` requires `{"operator_confirmed":true}` and writes only the selected historical bundle. `registry-recover-spend` uses the same explicit approval field for the selected executed spend. Existing historical V2 spend confirmation does not authorize a V3 attribution relationship. `registry-link` additionally requires specific approved evidence; chronology or shared goals are insufficient.
 

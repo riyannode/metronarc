@@ -8,6 +8,9 @@ type DocsSection = { id: string; title: string; content: ReactNode }
 type DocsArticle = { label: string; title: string; intro: string; sections: DocsSection[] }
 type DocsNavGroup = { label: string; items: { href: string; label: string }[] }
 
+const registryV3Address = '0xd26D5148deF3Eb37a0C28CE23674f58455918D7d'
+const registryV3Explorer = `https://explorer.testnet.arc.io/address/${registryV3Address}`
+
 const navGroups: DocsNavGroup[] = [
   { label: 'Start here', items: [{ href: '/docs', label: 'Overview' }, { href: '/docs/installation', label: 'Getting Started' }] },
   { label: 'Operations', items: [{ href: '/docs/operations', label: 'Business Operations' }, { href: '/docs/payments', label: 'Payments & Accounting' }] },
@@ -58,13 +61,14 @@ const articles: Record<string, DocsArticle> = {
         id: 'boundaries', title: 'System boundaries', content: <>
           <p>The AI host provides the model and connected tools. METRON runs its policy and ledger locally. It has no hosted backend, built-in email transport, or MCP server.</p>
           <p>Circle Agent Wallet holds and sends operating funds. METRON does not hold funds or route payments through a contract.</p>
+          <p>EconomicRegistry V3 is deployed and source verified on Arc Testnet. It records provenance, not payments. See <a href="/docs/architecture#economic-registry">EconomicRegistry V3 deployment and acceptance status</a>.</p>
         </>,
       },
       {
         id: 'supported-scope', title: 'Supported scope', content: <>
           <p><strong>Codex plugin installation and fresh-session recovery: VERIFIED / PASS.</strong> The completed Arc Testnet pilot includes Gmail negotiation, human approval, the 22 USDC PAID invoice, Circle reconciliation, balanced accounting, and confirmed customer delivery.</p>
           <p>Circle is the implemented payment provider. Paid x402 requests support <code>exact</code> and <code>GatewayWalletBatched</code> on Arc Testnet.</p>
-          <p>The two historical x402 payments passed before revenue. No post-revenue x402 payment was executed; historical V2 revenue attribution remains <code>SKIPPED / NO_EXPLICIT_ATTRIBUTION</code>. V3 is a development redesign with independent facts and optional attribution; it is not deployed or installed.</p>
+          <p>The two historical x402 payments passed before revenue. No post-revenue x402 payment was executed; historical V2 revenue attribution remains <code>SKIPPED / NO_EXPLICIT_ATTRIBUTION</code>. V3 is deployed and source verified on Arc Testnet. The installed Codex plugin is not activated for V3, and live V3 E2E remains unverified; these are separate from the existing pilot PASS results.</p>
           <p>Testnet records do not prove mainnet support or production readiness. The dashboard on the landing page uses illustrative data.</p>
           <a className="docs-inline-link" href="/docs/installation">Set up METRON <ArrowRight size={14} /></a>
         </>,
@@ -87,7 +91,7 @@ const articles: Record<string, DocsArticle> = {
       {
         id: 'install-plugin', title: 'Install the plugin', content: <>
           <p><strong>Existing operators: installation and fresh-session recovery PASS.</strong> METRON v0.2.0 is already installed and enabled with all four skills after the PR #20 refresh. Do not reinstall, log in again, create a wallet, reset SQLite, or repeat transactions to prove these results.</p>
-          <p>V3 development does not require existing operators to reinstall, reset their ledger, or repeat a payment. New settled sources enter a visible durable backlog while V3 is disabled. Activation verifies the approved chain, ABI and runtime bytecode; it never submits backlog. Selected resume and historical imports require separate approval.</p>
+          <p>The V3 contract is deployed and source verified on Arc Testnet. The installed plugin is enabled for the existing Codex business workflow, but it is not activated for V3 and live V3 E2E remains unverified. Deployment does not require existing operators to reinstall, reset their ledger, or repeat a payment. In the V3 runtime, new settled sources enter a visible durable backlog while V3 is disabled. Activation verifies the approved chain, ABI and runtime bytecode; it never submits backlog. Selected resume and historical imports require separate approval. See <a href="/docs/architecture#economic-registry">V3 deployment and acceptance status</a>.</p>
           <p>For new users, install through the Codex marketplace:</p>
           <CodeBlock label="New-user Codex installation" code={'codex plugin marketplace add riyannode/metronarc --ref master\ncodex plugin add metron@metron-local'} />
           <ol>
@@ -179,7 +183,7 @@ First check the Circle CLI METRON can call, including its WSL-to-Windows adapter
           <p><strong>Verified Codex pilot: Gmail negotiation, human approval, invoice delivery, and customer fulfillment PASS.</strong> Invoice <code>INV-000001</code> is <code>PAID</code> for 22 USDC. The final four-page report was delivered once in the existing customer thread with a <code>CONFIRMED</code> durable <code>DELIVERABLE</code> action.</p>
           <CodeBlock format="prompt" label="Read-only chat prompt" code="Use METRON. Show invoice INV-000001 and the status of its linked deal." />
           <p>Issuer, customer, price, tax, due date, and wallet details must come from configuration or approved deal data. METRON does not invent them.</p>
-          <p>After approved V3 activation, invoice settlement and earned-capital records describe the existing receipt. They do not create more revenue or authorize a payment. Optional spend attribution is a separate claim.</p>
+          <p>V3 is deployed and source verified, but the installed Codex plugin is not activated for V3 and live V3 E2E remains unverified. After separately approved activation, invoice settlement and earned-capital records describe the existing receipt. They do not create more revenue or authorize a payment. Optional <code>SUPPORTS</code> attribution is a separate claim requiring source evidence and operator approval; it never gates recording revenue.</p>
         </>,
       },
       {
@@ -197,7 +201,7 @@ First check the Circle CLI METRON can call, including its WSL-to-Windows adapter
     sections: [
       {
         id: 'operating-wallet', title: 'Operating wallet', content: <>
-          <p>Circle Agent Wallet is the operating account. Fund it directly. METRON does not custody funds or route payments through EconomicRegistry.</p>
+          <p>Circle Agent Wallet is the operating account. Fund it directly. EconomicRegistry V3 records provenance; it does not execute payments or hold funds. Circle remains payment authority and SQLite remains the accounting source of truth.</p>
           <p>Before dispatch, METRON checks the approved amount and minimum wallet balance against the applicable Circle balance. It does not switch between on-chain and Gateway balances.</p>
         </>,
       },
@@ -221,6 +225,13 @@ First check the Circle CLI METRON can call, including its WSL-to-Windows adapter
           <p><strong>Pilot accounting: PASS.</strong> Three payment entries and four posted balanced journals were retained. The 10% reinvestment policy allocated 2.20 USDC to earned operating capital; that allocation is not an executed vendor payment.</p>
           <p>Realized ROI uses reconciled customer revenue and confirmed x402 spend. It is undefined when confirmed spend is zero. Open invoices, quotes, and unconfirmed payments do not count.</p>
           <p>V3 revenue never requires a prior spend. After approval and activation, its provenance bundle contains three facts (incoming revenue, invoice settlement, earned allocation) and two relationships, without adding to accounting totals. Reconciliation submits only the selected invoice bundle, never unrelated pending records. Five registry execution requests transfer zero value but still incur USDC gas and Circle overhead; live fees require an approved deployed target and estimates. Many spends can relate to one revenue, and one spend to many revenues.</p>
+        </>,
+      },
+      {
+        id: 'registry-provenance', title: 'EconomicRegistry V3 provenance', content: <>
+          <p>Revenue can be recorded from authoritative settlement evidence without an originating Spend Intent or prior spend. V3 provenance does not execute, hold, or count another payment.</p>
+          <p><code>SUPPORTS</code> is an optional attribution relationship between confirmed spend and revenue facts. It requires specific operator approval, retained x402 output and customer-work evidence bound to the exact spend, deal, invoice and customer. A shared goal, chronology or a bare hash is insufficient; a wallet commitment is not independently verified causality.</p>
+          <p>The contract is deployed and source verified. The installed Codex plugin is not activated for V3 and live V3 E2E remains unverified. The existing Codex business E2E stays PASS. See <a href="/docs/architecture#economic-registry">deployment details and acceptance status</a>.</p>
         </>,
       },
       {
@@ -251,12 +262,23 @@ First check the Circle CLI METRON can call, including its WSL-to-Windows adapter
         </>,
       },
       {
-        id: 'economic-registry', title: 'EconomicRegistry', content: <>
-          <p>V3 is an immutable, non-custodial registry of independent typed facts and optional relationships. It is not deployed or enabled by default. A new Arc Testnet deployment and address require separate approval. The V2 contract remains historical at <code>0x547552585d8d995c5063820b2950e0db52b4cab4</code> on chain <code>5042002</code>.</p>
+        id: 'economic-registry', title: 'EconomicRegistry V3', content: <>
+          <p>EconomicRegistry V3 is an immutable, non-custodial registry of independent typed facts and optional relationships.</p>
+          <p><strong>Network:</strong> Arc Testnet · <strong>Chain ID:</strong> <code>5042002</code></p>
+          <p><strong>Deployment status:</strong> Deployed / Source Verified</p>
+          <CodeBlock label="Contract address" code={registryV3Address} />
+          <a className="docs-inline-link" href={registryV3Explorer} target="_blank" rel="noreferrer">View on Arc Explorer <ArrowUpRight size={14} /></a>
+          <ul>
+            <li><strong>Deployed / source verified:</strong> YES. Receipt, exact pinned runtime and <code>VERSION = 3</code> readback passed.</li>
+            <li><strong>Installed Codex plugin V3 activated:</strong> NO — NOT ACTIVATED.</li>
+            <li><strong>Live V3 E2E verified:</strong> NO — NOT LIVE VERIFIED.</li>
+            <li><strong>Existing Codex business E2E:</strong> PASS.</li>
+          </ul>
+          <p>Deployment does not activate the plugin or establish live workflow acceptance. This public contract address is documentation only; displaying or copying it does not change <code>registry_v3_address</code> in live configuration. The V2 contract remains historical at <code>0x547552585d8d995c5063820b2950e0db52b4cab4</code>.</p>
           <p>Circle remains payment authority and SQLite/journals remain financial truth. V3 revenue needs authoritative settlement evidence, never a spend. Optional many-to-many attribution does not alter totals. A wallet commitment proves who committed the hashes, not independent settlement or causal verification.</p>
           <p>The V2 pilot retains two confirmed SPEND records and <code>SKIPPED / NO_EXPLICIT_ATTRIBUTION</code> for revenue provenance. The historical 22 USDC receipt has not been imported into V3. Any approved import must retain original evidence and historical labeling without adding revenue or inventing spend attribution.</p>
           <p>Versioned schemas support future event types without changing the small V3 ABI. The registry cannot custody or transfer tokens, grant allowances, forward arbitrary transactions, or upgrade itself. On-chain records contain commitments, never customer emails, raw invoices, private documents, or secrets.</p>
-          <p>Attribution requires retained x402 output plus actual customer-work bytes bound to the specific deal/invoice/customer; a bare hash is insufficient. Append-only receipts bind their commitments, canonical facts, endpoints, registry references and readback. Raw work stays private, and auditable sources do not prove causality. Offline verification checks internal consistency; live chain readback and authoritative Circle evidence remain separate requirements.</p>
+          <p>Optional <code>SUPPORTS</code> attribution requires specific operator approval, retained x402 output plus actual customer-work bytes bound to the exact spend/deal/invoice/customer; a bare hash is insufficient. Revenue is recorded independently and never requires this relationship. Append-only receipts bind their commitments, canonical facts, endpoints, registry references and readback. Raw work stays private, and auditable sources do not prove causality. Offline verification checks internal consistency; live chain readback and authoritative Circle evidence remain separate requirements.</p>
         </>,
       },
       {

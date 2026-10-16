@@ -1,6 +1,6 @@
 # Tameion submission readiness
 
-Status checked 2026-10-16 (Asia/Jakarta). This page records the pilot evidence available in METRON's existing local ledger and the remaining submission gates. It is not a claim that the hackathon application or a video has been submitted. The event page lists the deadline as October 17, 2026 at 11:59 PM ET and requires a public GitHub repository plus a recorded video under three minutes; a deployed link is optional but strongly encouraged.
+Pilot evidence checked 2026-10-16; V3 documentation status updated 2026-10-17 (Asia/Jakarta). This page records the pilot evidence available in METRON's existing local ledger and the remaining submission gates. It is not a claim that the hackathon application or a video has been submitted. The event page lists the deadline as October 17, 2026 at 11:59 PM ET and requires a public GitHub repository plus a recorded video under three minutes; a deployed link is optional but strongly encouraged.
 
 ## Thesis
 
@@ -45,7 +45,7 @@ No post-revenue Spend Intent or payment was created. The active earned-capital p
 
 | Acceptance area | Status | Evidence / limitation |
 |---|---|---|
-| Plugin installation | **PASS** | METRON `0.2.0` is installed and enabled in Codex interactive chat. Post-merge source/marketplace/cache verification matched all 47 files to `dccb9c4497534118841f3819366362725b15b7be`; four skills loaded in a new session. V3 feature code is not installed. |
+| Plugin installation | **PASS** | METRON `0.2.0` is installed and enabled in Codex interactive chat. Post-merge source/marketplace/cache verification matched all 47 files to `dccb9c4497534118841f3819366362725b15b7be`; four skills loaded in a new session. This installed-baseline PASS does not establish V3 activation or live E2E acceptance. |
 | Policy and wallet | **PASS** | Circle reads 51.9 USDC in each of its native and ERC-20 Arc Testnet representations; they are not summed as one balance. Earned capital and hard caps are shown separately. |
 | Historical x402 payments | **PASS** | Two Circle-confirmed pre-revenue expenses and journals exist. Post-revenue x402 was not executed, and historical service-output artifacts are not durably retained; no V3 attribution is inferred. |
 | Gmail negotiation | **PASS** | The existing thread contains a confirmed 22 USDC offer, customer acceptance, and buyer-confirmed invoice terms. A prior separate reply action stays `UNKNOWN`. |
@@ -55,7 +55,7 @@ No post-revenue Spend Intent or payment was created. The active earned-capital p
 | Accounting and journals | **PASS** | Payment and expense evidence are unique; posted journals are balanced; reinvestment is 2.20 USDC. |
 | Customer fulfillment | **PASS** | Four-page report artifact and confirmed Gmail outbox/readback; test buyer is not independent traction. Gmail exposes no attachment checksum, so provider readback was verified by filename, MIME type, and size against the hashed local artifact. |
 | Post-revenue reinvestment x402 | **BLOCKED** | Current per-action and daily caps are 0.0001 USDC; Marketplace search found no useful configured-network candidate within policy. No Spend Intent exists and no payment was attempted. |
-| Fresh-session recovery | **PASS** | A new Codex interactive session loaded all four installed skills and recovered the existing SQLite ledger after merge `dccb9c4497534118841f3819366362725b15b7be`. Integrity and persisted finance/email/registry state passed; unresolved sends were preserved. This existing E2E evidence concerns the installed baseline, not undeployed V3. |
+| Fresh-session recovery | **PASS** | A new Codex interactive session loaded all four installed skills and recovered the existing SQLite ledger after merge `dccb9c4497534118841f3819366362725b15b7be`. Integrity and persisted finance/email/registry state passed; unresolved sends were preserved. This existing E2E evidence concerns the installed baseline, not activation or live E2E of the deployed V3 contract. |
 | Tameion submission readiness | **BLOCKED** | The repository is currently private and no recorded demo exists. Current event instructions require a public GitHub link and recorded video under three minutes; a deployment link is optional. Do not make the repository public or claim a video until those steps are separately authorized and completed. |
 
 ## Limitations and submission steps
@@ -66,7 +66,7 @@ No post-revenue Spend Intent or payment was created. The active earned-capital p
 - Test results, PDFs, and synthetic fixtures are not customer traction. Only the one Circle-reconciled Arc Testnet receipt is counted as payment evidence.
 - The repository is private, so external judges cannot currently clone or install it. Public visibility needs separate owner authorization and a secrets/PII review.
 - No video recording has been produced. Use [the demo storyboard](DEMO.md), record and inspect an under-three-minute video, then submit the public repository and video through the official event form before the posted deadline.
-- V3 deployment, installation and live acceptance require a separate approved rollout. Existing Codex baseline verification stays PASS; do not repeat payments or reset state. Keep `plugin.json` at `0.2.0` unless a separately approved release plan requires a version change.
+- V3 deployment and source verification are complete. Installed-plugin activation and live V3 E2E still require a separate approved rollout. Existing Codex baseline verification stays PASS; do not repeat payments or reset state. Keep `plugin.json` at `0.2.0` unless a separately approved release plan requires a version change.
 
 ## First-time user setup
 
@@ -74,8 +74,8 @@ Follow [Local installation](INSTALL.md): install the marketplace plugin, confirm
 
 Circle CLI baseline: the verified pilot used 1.2.1. It accepts `--testnet` even though login help omits the flag; this alone does not require an update. Setup remains for new users, not a request to repeat the existing E2E.
 
-## V3 development status
+## V3 deployment and acceptance status
 
-EconomicRegistry V3 separates independent Circle revenue from optional spend attribution. It is not deployed, installed, or exercised against live financial state. The existing 22 USDC receipt has not been imported into V3; any historical representation needs original Circle evidence, `historical=true`, and explicit operator approval. It cannot count as new revenue. V2 records and unresolved submissions remain historical and are never automatically resubmitted. See [V3 deployment and migration plan](REGISTRY_V3.md).
+EconomicRegistry V3 separates independent Circle revenue from optional spend attribution. **DEPLOYED / source verified:** Arc Testnet (`5042002`) at [`0xd26D5148deF3Eb37a0C28CE23674f58455918D7d`](https://explorer.testnet.arc.io/address/0xd26D5148deF3Eb37a0C28CE23674f58455918D7d); successful receipt, pinned runtime and `VERSION()==3` readback passed. **ACTIVATED: NOT ACTIVATED** in the installed Codex plugin. **LIVE VERIFIED: NOT LIVE VERIFIED**; V3 E2E through that plugin has not been exercised. Deployment does not change the existing Codex pilot PASS evidence or imply live financial acceptance. Optional `SUPPORTS` needs source evidence and specific operator approval; it is not required to record revenue. The existing 22 USDC receipt has not been imported into V3; any historical representation needs original Circle evidence, `historical=true`, and explicit operator approval. It cannot count as new revenue. V2 records and unresolved submissions remain historical and are never automatically resubmitted. See [V3 deployment and migration plan](REGISTRY_V3.md).
 
 Host compatibility: Codex interactive chat installation and recovery remain VERIFIED/PASS. See the [host compatibility note](INSTALL.md#supported-hosts) for the separately untested ChatGPT Desktop local host.
