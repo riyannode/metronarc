@@ -1,4 +1,4 @@
-import { ArrowRight, Check, ExternalLink, Github } from 'lucide-react'
+import { ArrowRight, Check, Github } from 'lucide-react'
 import { installation, repository } from '../content'
 import Reveal from './Reveal'
 
@@ -33,7 +33,7 @@ export default function Install() {
               </div>
             </div>
             <p className="mt-5 text-[11px] leading-relaxed text-[#5C5C5D]">You need a supported AI app, Python 3.11+, and Circle CLI with Node.js 20.18.2+. Invoice PDFs also need Bun. Private repository access is required.</p>
-            <a href={installation} target="_blank" rel="noreferrer" className="button mt-5 inline-flex items-center gap-2 text-[13px] font-semibold text-[#1D5FA8]">Read the installation guide <ExternalLink size={13} /></a>
+            <a href={installation} className="button mt-5 inline-flex items-center gap-2 text-[13px] font-semibold text-[#1D5FA8]">Read the installation guide <ArrowRight size={13} /></a>
           </Reveal>
         </div>
         <Reveal delay={0.1}><div className="mt-16 flex flex-wrap items-center justify-center gap-4 text-[12px] text-[#5C5C5D]"><span className="h-1.5 w-1.5 rounded-full bg-[#2775CA]" /><p>Use GitHub to install METRON. The npm setup tool is not published yet.</p><a href={repository} target="_blank" rel="noreferrer" aria-label="Open METRON GitHub repository" className="button text-[#1D5FA8]"><ArrowRight size={15} /></a></div></Reveal>

@@ -23,7 +23,10 @@ test('navigation and CTAs resolve to real sections and documentation', async ({ 
     await expect(page.locator(href)).toHaveCount(1)
   }
   await expect(page.getByRole('link', { name: 'Install METRON', exact: true })).toHaveAttribute('href', '#install')
-  await expect(page.getByRole('link', { name: 'Documentation', exact: true }).first()).toHaveAttribute('href', 'https://github.com/riyannode/metronarc/blob/master/README.md')
+  await expect(page.getByRole('link', { name: 'Documentation', exact: true }).first()).toHaveAttribute('href', '/docs')
+  await expect(page.locator('footer').getByRole('link', { name: 'Documentation' })).toHaveAttribute('href', '/docs')
+  await expect(page.getByRole('link', { name: 'Read the installation guide' })).toHaveAttribute('href', '/docs/installation')
+  await expect(page.getByRole('link', { name: 'riyannode/metronarc' })).toHaveAttribute('href', 'https://github.com/riyannode/metronarc')
   await expect(page.locator('#integrations')).toHaveCount(1)
   await expect(page.locator('#install')).toContainText('metron-payment')
   await expect(page.locator('#install')).toContainText('"Use METRON. Show status"')
@@ -127,6 +130,70 @@ test('mobile menu closes after navigation and Escape restores focus', async ({ p
   await page.getByRole('button', { name: 'Close navigation' }).press('Escape')
   await expect(page.getByRole('button', { name: 'Open navigation' })).toBeFocused()
   await expect(page.locator('#mobile-navigation')).toHaveCount(0)
+})
+
+test('documentation routes load directly, refresh, and navigate between articles', async ({ page }) => {
+  const routes = [
+    ['/docs', 'METRON documentation'],
+    ['/docs/installation', 'Install and set up METRON'],
+    ['/docs/operations', 'Business operations'],
+    ['/docs/payments', 'Payments & accounting'],
+    ['/docs/architecture', 'Architecture & security'],
+  ]
+
+  await page.goto('/')
+  const reference = await page.locator('#how-title').evaluate(element => {
+    const style = getComputedStyle(element)
+    return { family: style.fontFamily, weight: style.fontWeight }
+  })
+
+  for (const [route, title] of routes) {
+    await page.goto(route)
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(title)
+    const sidebar = page.getByRole('navigation', { name: 'Documentation navigation' })
+    await expect(sidebar.locator('[aria-current="page"]')).toHaveCount(1)
+    await expect(sidebar.locator('[aria-current="page"]')).toHaveAttribute('href', route)
+    await expect(page.locator('.docs-toc a')).toHaveCount(await page.locator('.docs-reader__section').count())
+
+    for (const heading of [page.getByRole('heading', { level: 1 }), ...await page.locator('.docs-reader__section h2').all()]) {
+      await expect(heading).toHaveCSS('font-family', reference.family)
+      await expect(heading).toHaveCSS('font-weight', reference.weight)
+    }
+
+    await page.reload()
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(title)
+  }
+
+  await page.goto('/docs')
+  await page.getByRole('navigation', { name: 'Documentation navigation' }).getByRole('link', { name: 'Payments & Accounting' }).click()
+  await expect(page).toHaveURL('/docs/payments')
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Payments & accounting')
+  await page.goBack()
+  await expect(page).toHaveURL('/docs')
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('METRON documentation')
+})
+
+test('documentation layout and copy controls work on desktop and mobile', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  for (const width of [390, 768, 1280]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto('/docs/installation')
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+    const copy = page.getByRole('button', { name: 'Copy shell code' }).first()
+    await copy.click()
+    await expect(page.getByRole('button', { name: 'Copied shell code' }).first()).toBeVisible()
+
+    if (width <= 1100) {
+      const toc = page.locator('.docs-toc-mobile')
+      await toc.locator('summary').click()
+      await toc.getByRole('link', { name: 'Set up Circle' }).click()
+      await expect(page).toHaveURL(/#circle-setup$/)
+    } else {
+      await page.locator('.docs-toc').getByRole('link', { name: 'Set up Circle' }).click()
+      await expect(page).toHaveURL(/#circle-setup$/)
+    }
+  }
 })
 
 test('reduced motion stops continuous motion and the hero uses a static image', async ({ page }) => {

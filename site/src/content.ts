@@ -1,6 +1,6 @@
 export const repository = 'https://github.com/riyannode/metronarc'
-export const documentation = `${repository}/blob/master/README.md`
-export const installation = `${repository}/blob/master/docs/INSTALL.md`
+export const documentation = '/docs'
+export const installation = '/docs/installation'
 export const settlement = 'https://explorer.testnet.arc.io/tx/0xe257b96faffecf815f3720c0cbbfe4bdcd1763d0b7685ef530f463a7a79e50eb'
 
 export const navigation = [
