@@ -71,6 +71,9 @@ The CLI returns stable codes in `{"ok":false,"error":{"code":...,"message":...}}
 | `METRON_CIRCLE_COMMAND_FAILED` | Circle CLI returned failure; inspect the CLI directly without exposing its credentials. |
 | `METRON_CIRCLE_SCHEMA_CHANGED` | Circle or Arc RPC output did not match the strict transaction/receipt shape METRON accepts. Stop reconciliation and inspect the provider response; do not infer asset, amount, or settlement fields. |
 | `METRON_REGISTRY_ATTRIBUTION_INVALID` | Legacy V2 attribution error; V3 revenue requires no spend. Existing deal input still validates an optional same-goal reference. |
+| `METRON_REGISTRY_ACTIVATION_REQUIRED` | New source is deferred, or activation is missing/unverified. Inspect the durable backlog; approve ABI/runtime-verified activation and selected resume. No payment is repeated. |
+| `METRON_REGISTRY_RELEASE_INVALID` | Bundled ABI/runtime/source release hashes are invalid or differ from the Foundry build; do not activate. |
+| `METRON_REGISTRY_ATTRIBUTION_EVIDENCE_INVALID` | Captured x402 output, customer-work bytes, deal/invoice/customer binding or evidence manifest is missing or inconsistent. A bare hash is not accepted; do not fabricate historical output. |
 | `METRON_REGISTRY_V3_NOT_CONFIGURED` | V3 dispatch is disabled until an approved deployment address is configured; payment/accounting truth is unaffected. |
 | `METRON_REGISTRY_CONTRACT_MISMATCH` | Configured deployment/version/chain conflicts with the sealed provenance context. V2 is never a V3 target. |
 | `METRON_REGISTRY_INVALID_UPDATE` | Internal provenance update attempted a sealed field; preserve the record and correct the caller. |

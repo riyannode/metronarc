@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import re
 
+import registry_evidence
+
 from registry_hashing import RegistryError, canonical, digest, identity, schema_hash, label, address, hash_value, SCHEMAS, RELATIONS, RELATION_ENDPOINTS, dispatch_key, settlement_identity
 
 
@@ -81,7 +83,8 @@ def verify(receipt: dict) -> dict:
         if set(receipt) != {"schema", "binding", "receipt_hash"} or receipt["schema"] != "metron.provenance-receipt/3":
             raise ValueError
         body = receipt["binding"]
-        expected_keys = {"payload", "record_hash", "content_hash", "idempotency_key", "status", "provider_tx_ref", "tx_hash", "readback", "facts"}
+        attribution = body["payload"]["schema"] == "metron.attribution/1"
+        expected_keys = ({"attribution"} if attribution else set()) | {"payload", "record_hash", "content_hash", "idempotency_key", "status", "provider_tx_ref", "tx_hash", "readback", "facts"}
         if set(body) != expected_keys or digest("METRON_RECEIPT_V3", body) != receipt["receipt_hash"]:
             raise ValueError
         if body["status"] not in {"PENDING", "SUBMITTED", "UNKNOWN", "CONFIRMED", "FAILED"}: raise ValueError
@@ -120,6 +123,10 @@ def verify(receipt: dict) -> dict:
                 target = body["facts"][1]["payload"]["data"]
                 if target["settlement_fact"] != data["from_fact"] or target["settlement_content_hash"] != data["from_content_hash"]:
                     raise ValueError
+        if attribution:
+            registry_evidence.verify_manifest(body["attribution"], data["basis"]["evidence_hash"], data["from_fact"], data["to_fact"])
+            if body["attribution"]["fulfillment"]["provider_ref"] != body["facts"][0]["payload"]["data"]["source"]["provider_ref"]:
+                raise ValueError
         if body["status"] == "CONFIRMED":
             result = body["readback"]
             expected = [payload["type_hash"], payload["schema_hash"]]
@@ -149,6 +156,11 @@ def save(db, row) -> dict:
                           (reference, row["contract_address"], row["operating_wallet"])).fetchone()
         if fact is None: raise RegistryError("METRON_REGISTRY_RECEIPT_INVALID")
         body["facts"].append({"record_hash": fact["record_hash"], "content_hash": fact["content_hash"], "payload": json.loads(fact["payload_json"])})
+    if body["payload"]["schema"] == "metron.attribution/1":
+        commitment = data["basis"]["evidence_hash"]
+        registry_evidence.audit(db, commitment)
+        proof = db.execute("SELECT manifest_json FROM registry_v3_attributions WHERE commitment=?", (commitment,)).fetchone()
+        body["attribution"] = json.loads(proof[0])
     receipt = {"schema": "metron.provenance-receipt/3", "binding": body, "receipt_hash": digest("METRON_RECEIPT_V3", body)}
     verify(receipt)
     db.execute("INSERT OR IGNORE INTO registry_v3_receipts VALUES (?,?,?)", (receipt["receipt_hash"], row["id"], canonical(receipt)))

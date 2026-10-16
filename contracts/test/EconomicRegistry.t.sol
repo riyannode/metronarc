@@ -81,7 +81,7 @@ contract EconomicRegistryTest is Test {
 
     function testWrongChainAndDeploymentReplaysRevert() public {
         bytes32 id = factId(wallet, revenueType, keccak256("receipt"));
-        uint256 originalChain = block.chainid;
+        uint256 originalChain = vm.getChainId();
         vm.chainId(originalChain + 1);
         vm.prank(wallet);
         vm.expectRevert(EconomicRegistry.InvalidIdentity.selector);

@@ -16,6 +16,8 @@ import circle
 import finance
 import registry
 import registry_receipts
+import registry_deployment
+import registry_evidence
 import store
 from registry_hashing import RegistryError, canonical, digest, label, dispatch_key
 import test_payment_evidence as fixtures
@@ -32,7 +34,8 @@ class RegistryV3Test(unittest.TestCase):
 
     def activate(self, wallet=PAYEE):
         store.write_config({'chain': 'ARC-TESTNET', 'operating_wallet': wallet,
-                            'registry_v3_address': CONTRACT, 'registry_v3_enabled': True})
+                            'registry_v3_address': CONTRACT, 'registry_v3_enabled': True,
+                            'registry_v3_verification': registry_deployment.binding(CONTRACT, wallet)})
 
     def revenue(self, suffix='1', prepare=True):
         self.activate()
@@ -156,12 +159,13 @@ class RegistryV3Test(unittest.TestCase):
 
     def test_missing_malformed_or_conflicting_readback_is_fail_closed(self):
         row=self.revenue()
-        _,_,query,_=self.chain()
+        _,_,query,execute=self.chain()
         with patch.object(circle,'registry_v3_query',return_value={'data':{'outputData':'0xBAD'}}),patch.object(circle,'registry_v3_execute') as send:
-            self.assertEqual(registry.sync(self.db,row['id'])['records'][0]['status'],'UNKNOWN')
+            self.assertEqual(registry.sync(self.db,row['id'])['records'][0]['status'],'PENDING')
             send.assert_not_called()
-        with patch.object(circle,'registry_v3_query',side_effect=query),patch.object(circle,'registry_v3_execute') as send:
-            registry.sync(self.db,row['id']);send.assert_not_called()
+        with patch.object(circle,'registry_v3_query',side_effect=query),patch.object(circle,'registry_v3_execute',side_effect=execute) as send:
+            self.assertEqual(registry.sync(self.db,row['id'])['records'][0]['status'],'CONFIRMED')
+            self.assertEqual(send.call_count,1)
 
     def test_sealed_records_sources_and_receipts_cannot_be_changed_or_deleted(self):
         row=self.revenue()
@@ -185,7 +189,7 @@ class RegistryV3Test(unittest.TestCase):
         self.assertEqual(registry.record_revenue(self.db,'INV-1',100000)['status'],'FAILED')
 
     def test_no_deployment_no_submission_and_history_requires_approval(self):
-        self.assertEqual(registry.record_revenue(self.db,'INV-missing')['error_code'],'METRON_REGISTRY_V3_NOT_CONFIGURED')
+        self.assertEqual(registry.record_revenue(self.db,'INV-missing')['error_code'],'METRON_REGISTRY_EVIDENCE_INVALID')
         with self.assertRaises(RegistryError):registry.recover_revenue(self.db,'INV-1')
         self.revenue()
         # Reusing the same settlement with a different historical label is a conflict, never a rewrite.
@@ -195,7 +199,7 @@ class RegistryV3Test(unittest.TestCase):
         self.revenue()
         before=self.financial_snapshot()
         # Remove only this fixture's empty/new provenance; reproduce a V2-only database.
-        for table in ['registry_v3_receipts', 'registry_v3_sources', 'registry_v3_records']:
+        for table in ['registry_v3_backlog', 'registry_v3_receipts', 'registry_v3_sources', 'registry_v3_records']:
             for trigger in self.db.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name=?", (table,)).fetchall():
                 self.db.execute('DROP TRIGGER ' + trigger[0])
             self.db.execute('DROP TABLE ' + table)
@@ -229,11 +233,15 @@ class RegistryV3Test(unittest.TestCase):
         with patch.object(circle,'registry_v3_query',side_effect=query),patch.object(circle,'registry_v3_execute',side_effect=execute):
             registry.sync(self.db)
         before=self.financial_snapshot()
+        customer_path = store.STATE_HOME / 'synthetic-customer-work.txt'
+        customer_path.write_bytes(b'synthetic customer deliverable')
         for fact in rows:
+            fulfillment = registry_evidence.capture(self.db, fact['source_entity_id'], {'output': 'synthetic paid service output'})
             for revenue in revenues:
-                relationship=registry.link(self.db,fact['id'],revenue['id'],label('operator-basis'))
+                evidence = {'fulfillment_id': fulfillment['id'], 'customer_artifact_path': str(customer_path)}
+                relationship=registry.link(self.db,fact['id'],revenue['id'],evidence)
                 self.assertIn('OPERATOR_ASSERTED',relationship['payload_json'])
-                self.assertEqual(registry.link(self.db,fact['id'],revenue['id'],label('operator-basis'))['id'],relationship['id'])
+                self.assertEqual(registry.link(self.db,fact['id'],revenue['id'],evidence)['id'],relationship['id'])
         self.assertEqual(before,self.financial_snapshot())
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM registry_v3_records WHERE type_hash=?",(label('SUPPORTS'),)).fetchone()[0],4)
 
@@ -290,7 +298,7 @@ class RegistryV3Test(unittest.TestCase):
         state['FACT',row['record_hash']]=[row['record_hash'],row['type_hash'],row['schema_hash'],row['evidence_id'],label('conflict')]
         with patch.object(circle,'registry_v3_query',side_effect=query),patch.object(circle,'registry_v3_execute') as send:
             result=registry.sync(self.db,row['id'])['records'][0]
-            self.assertEqual(result['status'],'UNKNOWN');self.assertEqual(result['error_code'],'METRON_REGISTRY_RECONCILIATION_MISMATCH');send.assert_not_called()
+            self.assertEqual(result['status'],'PENDING');self.assertEqual(result['error_code'],'METRON_REGISTRY_RECONCILIATION_MISMATCH');send.assert_not_called()
 
     def test_gateway_batch_references_are_per_transfer(self):
         from registry_hashing import settlement_aliases,settlement_identity

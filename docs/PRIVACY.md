@@ -13,6 +13,7 @@ METRON processes the information needed to apply economic policy and keep its lo
 - x402 service URL, HTTP method, request-body hash, estimate, payment scheme, seller, and result. For an approved service payment, the request body and payment details are sent by Circle CLI to Circle and the selected service provider.
 - For email-bound deals, a short buyer-confirmation excerpt containing the payer wallet and invoice due date, with its SHA-256 digest and source message/thread identifiers. Full raw email bodies are not stored.
 - Local configuration and a generated read-only dashboard derived from the ledger.
+- For future confirmed x402 executions, the returned service response is retained privately in SQLite with its request/payment binding. Optional operator-approved attribution also retains a selected customer-work artifact (up to 16 MiB) and a private deal/invoice/customer binding. These raw artifacts are never sent to EconomicRegistry. Exported provenance receipts contain hashes and a salted context commitment, not raw work, local paths, emails or the private binding.
 
 METRON does not collect email passwords, OTPs, Circle session tokens, private keys, seed phrases, or AI-host credentials. The `metron-email` skill sends and reads customer email through the host's connected email provider; METRON does not bundle an email transport.
 

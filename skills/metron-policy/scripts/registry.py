@@ -8,6 +8,8 @@ import circle
 import finance
 import store
 import registry_receipts
+import registry_deployment
+import registry_evidence
 from registry_hashing import RegistryError, address, canonical, digest, hash_value, identity, label, schema_hash, SCHEMAS, RELATIONS, RELATION_ENDPOINTS, dispatch_key, settlement_identity, settlement_aliases
 
 CHAIN_ID = 5042002
@@ -22,6 +24,8 @@ def context() -> dict:
         raise RegistryError("METRON_UNSUPPORTED_CHAIN")
     if config.get("registry_v3_enabled") is not True or not config.get("registry_v3_address"):
         raise RegistryError("METRON_REGISTRY_V3_NOT_CONFIGURED")
+    if not registry_deployment.approved(config):
+        raise RegistryError("METRON_REGISTRY_ACTIVATION_REQUIRED")
     contract = address(config["registry_v3_address"])
     if contract == V2_ADDRESS:
         raise RegistryError("METRON_REGISTRY_CONTRACT_MISMATCH")
@@ -123,12 +127,35 @@ def _result_error(exc) -> dict:
             "error_code": getattr(exc, "code", "METRON_REGISTRY_PERSISTENCE_FAILED")}
 
 
+def _deferred(db, source_type: str, source_id: str, historical: bool) -> dict | None:
+    try:
+        context()
+        return None
+    except RegistryError as exc:
+        if exc.code not in {"METRON_REGISTRY_V3_NOT_CONFIGURED", "METRON_REGISTRY_ACTIVATION_REQUIRED"} or historical:
+            raise
+        row = db.execute("SELECT id FROM registry_v3_backlog WHERE source_type=? AND source_entity_id=? AND status='DEFERRED'", (source_type, source_id)).fetchone()
+        if row is None:
+            raise RegistryError("METRON_REGISTRY_EVIDENCE_INVALID")
+        return {"status": "DEFERRED", "backlog_id": row["id"], "error_code": "METRON_REGISTRY_ACTIVATION_REQUIRED",
+                "requires_operator_action": True, "onchain_recorded": False}
+
+
+def _bound(db, source_type: str, source_id: str, record_id: str) -> None:
+    db.execute("UPDATE registry_v3_backlog SET status='BOUND',record_id=? WHERE source_type=? AND source_entity_id=? AND status='DEFERRED'",
+               (record_id, source_type, source_id))
+
+
 def record_spend(db, intent_id: str, *, historical: bool = False) -> dict:
     try:
+        deferred = _deferred(db, "SPEND_INTENT", intent_id, historical)
+        if deferred: return deferred
         ctx = context()
         source, _ = _evidence(db, "SPEND_INTENT", intent_id, ctx)
         with store.transaction(db):
-            return _fact(db, ctx, "X402_SPEND", {"source": source}, "SPEND_INTENT", intent_id, historical, source)
+            row = _fact(db, ctx, "X402_SPEND", {"source": source}, "SPEND_INTENT", intent_id, historical, source)
+            _bound(db, "SPEND_INTENT", intent_id, row["id"])
+            return row
     except (RegistryError, circle.CircleError, sqlite3.Error) as exc:
         return _result_error(exc)
 
@@ -154,6 +181,8 @@ def _relation(db, ctx: dict, relation_type: str, from_row: dict, to_row: dict, b
 
 def record_revenue(db, invoice_id: str, earned_capital_atomic: int | None = None, *, historical: bool = False) -> dict:
     try:
+        deferred = _deferred(db, "SALES_INVOICE", invoice_id, historical)
+        if deferred: return deferred
         ctx = context()
         source, payment = _evidence(db, "SALES_INVOICE", invoice_id, ctx)
         invoice = db.execute("SELECT i.*,d.status AS deal_status,d.terms_json FROM sales_invoices i JOIN deals d ON d.id=i.deal_id WHERE i.id=?", (invoice_id,)).fetchone()
@@ -178,18 +207,20 @@ def record_revenue(db, invoice_id: str, earned_capital_atomic: int | None = None
                                "asset": source["asset"], "chain_id": str(CHAIN_ID)}, "SALES_INVOICE", invoice_id, historical)
             _relation(db, ctx, "SETTLES", revenue, settlement, {"settlement_fact": revenue["record_hash"]}, historical)
             _relation(db, ctx, "ALLOCATES", revenue, allocation, {"settlement_fact": revenue["record_hash"]}, historical)
+            _bound(db, "SALES_INVOICE", invoice_id, revenue["id"])
             return revenue
     except (RegistryError, circle.CircleError, sqlite3.Error, ValueError, TypeError) as exc:
         return _result_error(exc)
 
 
-def link(db, from_id: str, to_id: str, evidence_hash: str) -> dict:
+def link(db, from_id: str, to_id: str, evidence: dict) -> dict:
     ctx = context()
     rows = [db.execute("SELECT * FROM registry_v3_records WHERE id=? AND kind='FACT' AND status='CONFIRMED'", (item,)).fetchone() for item in (from_id, to_id)]
     if any(row is None for row in rows) or rows[0]["type_hash"] != label("X402_SPEND") or rows[1]["type_hash"] != label("CIRCLE_REVENUE"):
         raise RegistryError("METRON_REGISTRY_RELATIONSHIP_INVALID")
     with store.transaction(db):
-        return _relation(db, ctx, "SUPPORTS", dict(rows[0]), dict(rows[1]), {"evidence_hash": hash_value(evidence_hash)}, bool(rows[0]["historical"] or rows[1]["historical"]))
+        commitment = registry_evidence.prepare(db, dict(rows[0]), dict(rows[1]), evidence)
+        return _relation(db, ctx, "SUPPORTS", dict(rows[0]), dict(rows[1]), {"evidence_hash": commitment}, bool(rows[0]["historical"] or rows[1]["historical"]))
 
 
 def _words(response: dict, count: int) -> list[str]:
@@ -258,6 +289,7 @@ def _sync_one(db, record_id: str) -> dict:
     row = db.execute("SELECT * FROM registry_v3_records WHERE id=?", (record_id,)).fetchone()
     if row["status"] in {"CONFIRMED", "FAILED"}:
         return dict(row)
+    claimed = False
     try:
         _check_seal(row)
         current = _readback(row)
@@ -272,10 +304,11 @@ def _sync_one(db, record_id: str) -> dict:
                 if fact is None or not _readback(fact)["matched"]:
                     return dict(row) | {"error_code": "METRON_REGISTRY_FACT_PENDING"}
         with store.transaction(db):
-            claimed = db.execute("UPDATE registry_v3_records SET status='SUBMITTED' WHERE id=? AND status='PENDING' AND provider_tx_ref IS NULL AND tx_hash IS NULL", (record_id,)).rowcount
-            if claimed == 1:
+            count = db.execute("UPDATE registry_v3_records SET status='SUBMITTED' WHERE id=? AND status='PENDING' AND provider_tx_ref IS NULL AND tx_hash IS NULL", (record_id,)).rowcount
+            if count == 1:
                 registry_receipts.save(db, db.execute("SELECT * FROM registry_v3_records WHERE id=?", (record_id,)).fetchone())
-        if claimed != 1:
+        claimed = count == 1
+        if not claimed:
             return {"id": record_id, "status": "UNKNOWN", "error_code": "METRON_REGISTRY_ALREADY_CLAIMED"}
         parameters = [row["record_hash"], row["type_hash"], row["schema_hash"]]
         parameters += [row["evidence_id"]] if row["kind"] == "FACT" else [row["from_fact"], row["to_fact"]]
@@ -294,6 +327,13 @@ def _sync_one(db, record_id: str) -> dict:
         return _mark(db, record_id, "CONFIRMED" if current["matched"] else "UNKNOWN",
                      None if current["matched"] else "METRON_REGISTRY_READBACK_PENDING", readback_json=canonical(current))
     except (RegistryError, circle.CircleError, sqlite3.Error, ValueError, TypeError) as exc:
+        # A stale worker must not reset another worker's durable claim.
+        fresh = db.execute("SELECT * FROM registry_v3_records WHERE id=?", (record_id,)).fetchone()
+        if not claimed and fresh["status"] == "PENDING" and not fresh["provider_tx_ref"] and not fresh["tx_hash"]:
+            with store.transaction(db):
+                db.execute("UPDATE registry_v3_records SET error_code=? WHERE id=? AND status='PENDING' AND provider_tx_ref IS NULL AND tx_hash IS NULL",
+                           (getattr(exc, "code", "METRON_REGISTRY_RECONCILIATION_FAILED"), record_id))
+            return dict(db.execute("SELECT * FROM registry_v3_records WHERE id=?", (record_id,)).fetchone())
         return _mark(db, record_id, "UNKNOWN", getattr(exc, "code", "METRON_REGISTRY_RECONCILIATION_FAILED"))
 
 
@@ -320,18 +360,43 @@ def recover_spend(db, intent_id: str, *, operator_confirmed: bool = False) -> di
     return row if row.get("status") in {"FAILED", "SKIPPED"} else sync(db, row["id"])
 
 
+def sync_revenue(db, invoice_id: str) -> dict:
+    ctx = context()
+    facts = [dict(row) for row in db.execute("SELECT * FROM registry_v3_records WHERE contract_address=? AND operating_wallet=? AND kind='FACT' AND source_type='SALES_INVOICE' AND source_entity_id=?",
+                                           (ctx["registry"], ctx["wallet"], invoice_id))]
+    expected = {label(name) for name in ["CIRCLE_REVENUE", "INVOICE_SETTLEMENT", "EARNED_CAPITAL"]}
+    if len(facts) != 3 or {row["type_hash"] for row in facts} != expected:
+        raise RegistryError("METRON_REGISTRY_CONFLICT")
+    revenue = next(row for row in facts if row["type_hash"] == label("CIRCLE_REVENUE"))
+    relationships = []
+    for kind, target in [("SETTLES", "INVOICE_SETTLEMENT"), ("ALLOCATES", "EARNED_CAPITAL")]:
+        endpoint = next(row for row in facts if row["type_hash"] == label(target))
+        relation = db.execute("SELECT * FROM registry_v3_records WHERE kind='RELATIONSHIP' AND contract_address=? AND operating_wallet=? AND type_hash=? AND from_fact=? AND to_fact=?",
+                              (ctx["registry"], ctx["wallet"], label(kind), revenue["record_hash"], endpoint["record_hash"])).fetchone()
+        if relation is None: raise RegistryError("METRON_REGISTRY_CONFLICT")
+        relationships.append(relation)
+    return {"records": [_sync_one(db, row["id"]) for row in facts + relationships]}
+
+
+def resume(db, backlog_id: str, *, operator_confirmed: bool = False) -> dict:
+    if operator_confirmed is not True: raise RegistryError("METRON_REGISTRY_HISTORY_APPROVAL_REQUIRED")
+    context()
+    item = db.execute("SELECT * FROM registry_v3_backlog WHERE id=?", (backlog_id,)).fetchone()
+    if item is None: raise RegistryError("METRON_REGISTRY_RECORD_NOT_FOUND")
+    if item["source_type"] == "SALES_INVOICE":
+        row = record_revenue(db, item["source_entity_id"])
+        return sync_revenue(db, item["source_entity_id"]) if row.get("id") else row
+    row = record_spend(db, item["source_entity_id"])
+    return sync(db, row["id"]) if row.get("id") else row
+
+
 def recover_revenue(db, invoice_id: str, *, operator_confirmed: bool = False) -> dict:
     if operator_confirmed is not True:
         raise RegistryError("METRON_REGISTRY_HISTORY_APPROVAL_REQUIRED")
     row = record_revenue(db, invoice_id, historical=True)
     if row.get("status") in {"FAILED", "SKIPPED"}:
         return row
-    ids = [item[0] for item in db.execute(
-        "SELECT id FROM registry_v3_records WHERE contract_address=? AND operating_wallet=? "
-        "AND ((source_type='SALES_INVOICE' AND source_entity_id=?) OR "
-        "(kind='RELATIONSHIP' AND from_fact=?)) ORDER BY CASE kind WHEN 'FACT' THEN 0 ELSE 1 END,id",
-        (row["contract_address"], row["operating_wallet"], invoice_id, row["record_hash"]))]
-    return {"records": [_sync_one(db, item) for item in ids]}
+    return sync_revenue(db, invoice_id)
 
 
 def receipts(db, record_id: str) -> list[dict]:
@@ -353,7 +418,10 @@ def status(db) -> dict:
     else:
         latest = [dict(row) for row in db.execute("SELECT id,record_type,source_entity_id,chain,contract_address,status,provider_tx_ref,tx_hash,created_at,confirmed_at FROM registry_records WHERE contract_address=? AND operating_wallet=? ORDER BY created_at DESC LIMIT 10", (V2_ADDRESS, wallet))]
     return {"chain": "ARC-TESTNET", "chain_id": CHAIN_ID, "contract_address": active or V2_ADDRESS,
-            "version": "3" if active else "2", "activation_status": "V3_CONFIGURED" if active else "V3_NOT_DEPLOYED_V2_HISTORICAL",
+            "version": "3" if active else "2", "activation_status": ("V3_ACTIVE_VERIFIED" if registry_deployment.approved(config) else "V3_ACTIVATION_REQUIRED") if active else "V3_NOT_DEPLOYED_V2_HISTORICAL",
+            "deferred_count": db.execute("SELECT COUNT(*) FROM registry_v3_backlog WHERE status='DEFERRED'").fetchone()[0],
+            "deferred_records": [dict(row) for row in db.execute("SELECT id,source_type,source_entity_id,status FROM registry_v3_backlog WHERE status='DEFERRED' ORDER BY created_at,id")],
+            "activation_required": not active or not registry_deployment.approved(config),
             "historical_contract_address": V2_ADDRESS, "counts": counts if active else historical_counts,
             "latest_records": latest, "historical_counts": historical_counts}
 

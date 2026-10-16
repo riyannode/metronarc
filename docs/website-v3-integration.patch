@@ -13,7 +13,7 @@
        {
          id: 'install-plugin', title: 'Install the plugin', content: <>
            <p><strong>Existing operators: installation and fresh-session recovery PASS.</strong> METRON v0.2.0 is already installed and enabled with all four skills after the PR #20 refresh. Do not reinstall, log in again, create a wallet, reset SQLite, or repeat transactions to prove these results.</p>
-+          <p>V3 development does not require existing operators to reinstall, reset their ledger, or repeat a payment. Registry activation and historical imports need separate operator approval.</p>
++          <p>V3 development does not require existing operators to reinstall, reset their ledger, or repeat a payment. New settled sources enter a visible durable backlog while V3 is disabled. Activation verifies the approved chain, ABI and runtime bytecode; it never submits backlog. Selected resume and historical imports require separate approval.</p>
            <p>For new users, install through the Codex marketplace:</p>
            <CodeBlock label="New-user Codex installation" code={'codex plugin marketplace add riyannode/metronarc --ref master\ncodex plugin add metron@metron-local'} />
            <ol>
@@ -29,7 +29,7 @@
            <p>Confirmed evidence creates a Payment Entry and a balanced journal in SQLite. An invoice becomes <code>PAID</code> only when matching incoming USDC evidence is reconciled and consumed.</p>
            <p><strong>Pilot accounting: PASS.</strong> Three payment entries and four posted balanced journals were retained. The 10% reinvestment policy allocated 2.20 USDC to earned operating capital; that allocation is not an executed vendor payment.</p>
            <p>Realized ROI uses reconciled customer revenue and confirmed x402 spend. It is undefined when confirmed spend is zero. Open invoices, quotes, and unconfirmed payments do not count.</p>
-+          <p>V3 revenue never requires a prior spend. After approval and activation, its provenance bundle contains three facts (incoming revenue, invoice settlement, earned allocation) and two relationships, without adding to accounting totals. Many spends can relate to one revenue, and one spend to many revenues.</p>
++          <p>V3 revenue never requires a prior spend. After approval and activation, its provenance bundle contains three facts (incoming revenue, invoice settlement, earned allocation) and two relationships, without adding to accounting totals. Reconciliation submits only the selected invoice bundle, never unrelated pending records. Five registry execution requests transfer zero value but still incur USDC gas and Circle overhead; live fees require an approved deployed target and estimates. Many spends can relate to one revenue, and one spend to many revenues.</p>
          </>,
        },
        {
@@ -44,7 +44,7 @@
 +          <p>Circle remains payment authority and SQLite/journals remain financial truth. V3 revenue needs authoritative settlement evidence, never a spend. Optional many-to-many attribution does not alter totals. A wallet commitment proves who committed the hashes, not independent settlement or causal verification.</p>
 +          <p>The V2 pilot retains two confirmed SPEND records and <code>SKIPPED / NO_EXPLICIT_ATTRIBUTION</code> for revenue provenance. The historical 22 USDC receipt has not been imported into V3. Any approved import must retain original evidence and historical labeling without adding revenue or inventing spend attribution.</p>
 +          <p>Versioned schemas support future event types without changing the small V3 ABI. The registry cannot custody or transfer tokens, grant allowances, forward arbitrary transactions, or upgrade itself. On-chain records contain commitments, never customer emails, raw invoices, private documents, or secrets.</p>
-+          <p>Append-only receipts bind canonical fact preimages, source evidence, endpoint content, registry transaction references and readback. Offline verification checks internal consistency; live chain readback and authoritative Circle evidence remain separate requirements.</p>
++          <p>Attribution requires retained x402 output plus actual customer-work bytes bound to the specific deal/invoice/customer; a bare hash is insufficient. Append-only receipts bind their commitments, canonical facts, endpoints, registry references and readback. Raw work stays private, and auditable sources do not prove causality. Offline verification checks internal consistency; live chain readback and authoritative Circle evidence remain separate requirements.</p>
          </>,
        },
        {
@@ -53,7 +53,7 @@
            <p>The completed fresh-session check preserved one legacy <code>UNKNOWN</code> email send, two inbound <code>PROCESSING</code> rows, and a conversation still at <code>PENDING_HUMAN</code> while its deal is <code>CLOSED_WON</code> and invoice <code>PAID</code>. Recovery PASS confirms persisted evidence; it does not claim those separate workflow states were repaired.</p>
            <p>Payment, email, and registry operations preserve ambiguous results instead of repeating them. Resolve payment state through Circle evidence and email state through the existing thread.</p>
 -          <p>Registry records use a local outbox. Only a fresh <code>PENDING</code> record can make its first submission. <code>SUBMITTED</code> and <code>UNKNOWN</code> allow readback only. They must not be resubmitted.</p>
-+          <p>V2 records permit historical readback only. V3 uses a separate durable outbox and IDs. Historical imports require specific approval and never repeat accounting. Only a fresh <code>PENDING</code> record can make its first submission. <code>SUBMITTED</code> and <code>UNKNOWN</code> allow readback only, including a crash before dispatch. They must not be resubmitted.</p>
++          <p>V2 records permit historical readback only. V3 uses a separate durable outbox and IDs. Historical imports require specific approval and never repeat accounting. An unclaimed <code>PENDING</code> record remains retryable after a transient read failure, with no dispatch. Only a fresh <code>PENDING</code> record can make its first submission. <code>SUBMITTED</code> and <code>UNKNOWN</code> allow readback only, including a crash before dispatch. They must not be resubmitted.</p>
          </>,
        },
      ],

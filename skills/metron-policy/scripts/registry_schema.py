@@ -38,4 +38,44 @@ CREATE TRIGGER IF NOT EXISTS registry_v3_receipts_sealed BEFORE UPDATE ON regist
  BEGIN SELECT RAISE(ABORT,'METRON_REGISTRY_SEALED'); END;
 CREATE TRIGGER IF NOT EXISTS registry_v3_receipts_no_delete BEFORE DELETE ON registry_v3_receipts
  BEGIN SELECT RAISE(ABORT,'METRON_REGISTRY_SEALED'); END;
+
+CREATE TABLE IF NOT EXISTS registry_v3_backlog (
+ id TEXT PRIMARY KEY, evidence_id TEXT NOT NULL UNIQUE REFERENCES payment_evidence(id),
+ payment_entry_id TEXT NOT NULL UNIQUE REFERENCES payment_entries(id),
+ source_type TEXT NOT NULL, source_entity_id TEXT NOT NULL,
+ chain TEXT NOT NULL CHECK(chain='ARC-TESTNET'), created_at TEXT NOT NULL,
+ status TEXT NOT NULL DEFAULT 'DEFERRED' CHECK(status IN ('DEFERRED','BOUND')),
+ record_id TEXT REFERENCES registry_v3_records(id)
+);
+CREATE TRIGGER IF NOT EXISTS registry_v3_capture AFTER INSERT ON payment_evidence
+ WHEN NEW.chain='ARC-TESTNET' AND NEW.provider='CIRCLE'
+ BEGIN
+ INSERT INTO registry_v3_backlog(id,evidence_id,payment_entry_id,source_type,source_entity_id,chain,created_at)
+ SELECT 'RB3-' || NEW.id,NEW.id,p.id,p.source_type,p.source_id,NEW.chain,NEW.observed_at
+ FROM payment_entries p WHERE p.id=NEW.payment_entry_id
+ AND ((p.source_type='SPEND_INTENT' AND p.direction='OUT' AND p.status='CONFIRMED')
+ OR (p.source_type='SALES_INVOICE' AND p.direction='IN' AND p.status='RECONCILED'));
+ END;
+CREATE TRIGGER IF NOT EXISTS registry_v3_backlog_sealed BEFORE UPDATE OF
+ id,evidence_id,payment_entry_id,source_type,source_entity_id,chain,created_at ON registry_v3_backlog
+ BEGIN SELECT RAISE(ABORT,'METRON_REGISTRY_SEALED'); END;
+CREATE TRIGGER IF NOT EXISTS registry_v3_backlog_no_delete BEFORE DELETE ON registry_v3_backlog
+ BEGIN SELECT RAISE(ABORT,'METRON_REGISTRY_SEALED'); END;
+
+CREATE TABLE IF NOT EXISTS registry_v3_fulfillments (
+ id TEXT PRIMARY KEY, spend_intent_id TEXT NOT NULL UNIQUE REFERENCES spend_intents(id),
+ descriptor_json TEXT NOT NULL, response_blob BLOB NOT NULL
+);
+CREATE TABLE IF NOT EXISTS registry_v3_attributions (
+ commitment TEXT PRIMARY KEY, fulfillment_id TEXT NOT NULL REFERENCES registry_v3_fulfillments(id),
+ manifest_json TEXT NOT NULL, context_json TEXT NOT NULL, customer_artifact BLOB NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS registry_v3_fulfillments_sealed BEFORE UPDATE ON registry_v3_fulfillments
+ BEGIN SELECT RAISE(ABORT,'METRON_REGISTRY_SEALED'); END;
+CREATE TRIGGER IF NOT EXISTS registry_v3_fulfillments_no_delete BEFORE DELETE ON registry_v3_fulfillments
+ BEGIN SELECT RAISE(ABORT,'METRON_REGISTRY_SEALED'); END;
+CREATE TRIGGER IF NOT EXISTS registry_v3_attributions_sealed BEFORE UPDATE ON registry_v3_attributions
+ BEGIN SELECT RAISE(ABORT,'METRON_REGISTRY_SEALED'); END;
+CREATE TRIGGER IF NOT EXISTS registry_v3_attributions_no_delete BEFORE DELETE ON registry_v3_attributions
+ BEGIN SELECT RAISE(ABORT,'METRON_REGISTRY_SEALED'); END;
 """

@@ -177,14 +177,32 @@ def registry_query(signature: str, parameters: list[str], contract: str, chain: 
 
 def _registry_v3_target(contract: str, chain: str, wallet: str | None = None) -> None:
     import store
+    import registry_deployment
     config = store.read_config()
     if (chain != "ARC-TESTNET" or config.get("registry_v3_enabled") is not True
             or not _is_evm_address(contract) or int(contract, 16) == 0
             or contract.lower() != str(config.get("registry_v3_address", "")).lower()
             or contract.lower() == "0x547552585d8d995c5063820b2950e0db52b4cab4"
+            or not _is_evm_address(config.get("operating_wallet")) or not registry_deployment.approved(config)
             or (wallet is not None and (not _is_evm_address(wallet) or int(wallet, 16) == 0
                 or wallet.lower() != str(config.get("operating_wallet", "")).lower()))):
         raise CircleError("METRON_REGISTRY_CALL_NOT_ALLOWED")
+
+
+def registry_v3_inspect(contract: str) -> dict:
+    if not _is_evm_address(contract) or int(contract, 16) == 0 or contract.lower() == "0x547552585d8d995c5063820b2950e0db52b4cab4":
+        raise CircleError("METRON_REGISTRY_CALL_NOT_ALLOWED")
+    if _arc_rpc("eth_chainId", []) != hex(ARC_TESTNET_CHAIN_ID):
+        raise CircleError("METRON_REGISTRY_CONTRACT_MISMATCH")
+    code = _arc_rpc("eth_getCode", [contract, "latest"])
+    if not isinstance(code, str) or not re.fullmatch(r"0x(?:[0-9a-fA-F]{2})+", code):
+        raise CircleError("METRON_REGISTRY_CONTRACT_MISMATCH")
+    response = call(["contract", "query", "VERSION()", "--contract", contract, "--chain", "ARC-TESTNET"])
+    data = response.get("data") if isinstance(response, dict) else None
+    raw = data.get("outputData") if isinstance(data, dict) else None
+    if not isinstance(raw, str) or raw.lower() != "0x" + format(3, "064x"):
+        raise CircleError("METRON_REGISTRY_CONTRACT_MISMATCH")
+    return {"chain_id": str(ARC_TESTNET_CHAIN_ID), "runtime_sha256": hashlib.sha256(bytes.fromhex(code[2:])).hexdigest(), "version": "3"}
 
 
 def registry_v3_query(signature: str, parameters: list[str], contract: str, chain: str) -> dict:
