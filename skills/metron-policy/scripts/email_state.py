@@ -163,6 +163,151 @@ def _conversation(db: sqlite3.Connection, account: str, conversation_id: str) ->
     return row
 
 
+def _reconciled_recovery_evidence(db: sqlite3.Connection, invoice_id: str, deal_id: str) -> dict:
+    import registry
+
+    invoice = db.execute(
+        "SELECT i.*,d.status AS deal_status,d.terms_json FROM sales_invoices i "
+        "JOIN deals d ON d.id=i.deal_id WHERE i.id=? AND d.id=?",
+        (invoice_id, deal_id),
+    ).fetchone()
+    if invoice is None or invoice["status"] != "PAID" or invoice["deal_status"] != "CLOSED_WON":
+        raise finance.DomainError("METRON_EMAIL_RECOVERY_NOT_READY")
+    payments = db.execute(
+        "SELECT * FROM payment_entries WHERE source_type='SALES_INVOICE' AND source_id=?",
+        (invoice_id,),
+    ).fetchall()
+    if len(payments) != 1:
+        raise finance.DomainError("METRON_EMAIL_RECOVERY_NOT_READY")
+    payment = payments[0]
+    evidence = db.execute("SELECT * FROM payment_evidence WHERE payment_entry_id=?", (payment["id"],)).fetchall()
+    journal = db.execute(
+        "SELECT * FROM journal_entries WHERE source_type='PAYMENT_ENTRY' AND source_id=?",
+        (payment["id"],),
+    ).fetchall()
+    lines = db.execute(
+        "SELECT COUNT(*) AS count,COALESCE(SUM(debit_atomic),0) AS debit,"
+        "COALESCE(SUM(credit_atomic),0) AS credit,"
+        "SUM(CASE WHEN currency!='USDC' THEN 1 ELSE 0 END) AS wrong_currency "
+        "FROM journal_lines WHERE journal_entry_id=?",
+        (journal[0]["id"],),
+    ).fetchone() if len(journal) == 1 else None
+    terms = json.loads(invoice["terms_json"])
+    config = store.read_config()
+    wallet = str(config.get("operating_wallet", "")).lower()
+    if (payment["direction"] != "IN" or payment["status"] != "RECONCILED" or payment["provider"] != "CIRCLE"
+            or payment["currency"] != "USDC" or payment["amount_atomic"] != invoice["amount_atomic"]
+            or len(evidence) != 1 or evidence[0]["provider"] != "CIRCLE"
+            or evidence[0]["evidence_type"] != "CIRCLE_TRANSACTION" or evidence[0]["chain"] != "ARC-TESTNET"
+            or evidence[0]["currency"] != "USDC" or evidence[0]["amount_atomic"] != invoice["amount_atomic"]
+            or evidence[0]["provider_ref"] != payment["provider_payment_id"]
+            or not evidence[0]["tx_hash"] or (evidence[0]["to_address"] or "").lower() != wallet
+            or (evidence[0]["from_address"] or "").lower() != str(terms.get("payer_wallet", "")).lower()
+            or len(journal) != 1 or journal[0]["status"] != "POSTED" or lines is None
+            or lines["count"] < 2 or lines["debit"] != invoice["amount_atomic"]
+            or lines["credit"] != invoice["amount_atomic"] or lines["wrong_currency"]):
+        raise finance.DomainError("METRON_EMAIL_RECOVERY_NOT_READY")
+    reconciliations = db.execute(
+        "SELECT data_json FROM events WHERE event_type='INVOICE_RECONCILED' AND entity_id=?",
+        (invoice_id,),
+    ).fetchall()
+    if len(reconciliations) != 1:
+        raise finance.DomainError("METRON_EMAIL_RECOVERY_NOT_READY")
+    reconciliation = json.loads(reconciliations[0]["data_json"])
+    earned = reconciliation.get("reinvestment_atomic")
+    if (reconciliation.get("payment_entry_id") != payment["id"]
+            or reconciliation.get("journal_id") != journal[0]["id"]
+            or type(earned) is not int or earned < 0 or earned > invoice["amount_atomic"]):
+        raise finance.DomainError("METRON_EMAIL_RECOVERY_NOT_READY")
+
+    try:
+        ctx = registry.context()
+    except registry.RegistryError:
+        raise finance.DomainError("METRON_EMAIL_RECOVERY_NOT_READY") from None
+    facts = db.execute(
+        "SELECT * FROM registry_v3_records WHERE kind='FACT' AND source_type='SALES_INVOICE' "
+        "AND source_entity_id=? AND contract_address=? AND operating_wallet=? AND chain='ARC-TESTNET'",
+        (invoice_id, ctx["registry"], ctx["wallet"]),
+    ).fetchall()
+    fact_types = {registry.label(name) for name in ("CIRCLE_REVENUE", "INVOICE_SETTLEMENT", "EARNED_CAPITAL")}
+    if len(facts) != 3 or {row["type_hash"] for row in facts} != fact_types:
+        raise finance.DomainError("METRON_EMAIL_RECOVERY_NOT_READY")
+    revenue = next(row for row in facts if row["type_hash"] == registry.label("CIRCLE_REVENUE"))
+    fact_by_type = {row["type_hash"]: row for row in facts}
+    try:
+        source = json.loads(revenue["payload_json"])["data"]["source"]
+        settlement_data = json.loads(fact_by_type[registry.label("INVOICE_SETTLEMENT")]["payload_json"])["data"]
+        earned_data = json.loads(fact_by_type[registry.label("EARNED_CAPITAL")]["payload_json"])["data"]
+    except (KeyError, TypeError, ValueError):
+        raise finance.DomainError("METRON_EMAIL_RECOVERY_NOT_READY") from None
+    settlement = fact_by_type[registry.label("INVOICE_SETTLEMENT")]
+    earned_fact = fact_by_type[registry.label("EARNED_CAPITAL")]
+    if (source.get("provider") != "CIRCLE" or source.get("provider_ref") != evidence[0]["provider_ref"]
+            or not isinstance(source.get("tx_hash"), str)
+            or source["tx_hash"].lower() != evidence[0]["tx_hash"].lower()
+            or not isinstance(source.get("from_address"), str)
+            or source["from_address"].lower() != evidence[0]["from_address"].lower()
+            or not isinstance(source.get("to_address"), str)
+            or source["to_address"].lower() != evidence[0]["to_address"].lower()
+            or source.get("amount_atomic") != str(invoice["amount_atomic"])
+            or settlement_data.get("settlement_fact") != revenue["record_hash"]
+            or settlement_data.get("settlement_content_hash") != revenue["content_hash"]
+            or settlement_data.get("amount_atomic") != str(invoice["amount_atomic"])
+            or earned_data.get("settlement_fact") != revenue["record_hash"]
+            or earned_data.get("settlement_content_hash") != revenue["content_hash"]
+            or earned_data.get("amount_atomic") != str(earned)
+            or earned_data.get("asset") != settlement_data.get("asset")
+            or earned_data.get("chain_id") != settlement_data.get("chain_id")
+            or settlement["source_entity_id"] != invoice_id or earned_fact["source_entity_id"] != invoice_id):
+        raise finance.DomainError("METRON_EMAIL_RECOVERY_NOT_READY")
+    relations = []
+    for relation_type, endpoint_type in (("SETTLES", "INVOICE_SETTLEMENT"), ("ALLOCATES", "EARNED_CAPITAL")):
+        endpoint = fact_by_type[registry.label(endpoint_type)]
+        relation = db.execute(
+            "SELECT * FROM registry_v3_records WHERE kind='RELATIONSHIP' AND type_hash=? "
+            "AND from_fact=? AND to_fact=? AND contract_address=? AND operating_wallet=? AND chain='ARC-TESTNET'",
+            (registry.label(relation_type), revenue["record_hash"], endpoint["record_hash"],
+             ctx["registry"], ctx["wallet"]),
+        ).fetchone()
+        if relation is None:
+            raise finance.DomainError("METRON_EMAIL_RECOVERY_NOT_READY")
+        relations.append(relation)
+    if db.execute(
+        "SELECT COUNT(*) FROM registry_v3_records WHERE kind='RELATIONSHIP' AND from_fact=? "
+        "AND contract_address=? AND operating_wallet=?",
+        (revenue["record_hash"], ctx["registry"], ctx["wallet"]),
+    ).fetchone()[0] != 2:
+        raise finance.DomainError("METRON_EMAIL_RECOVERY_NOT_READY")
+    records = [*facts, *relations]
+    for record in records:
+        if (record["status"] != "CONFIRMED" or not record["provider_tx_ref"] or not record["tx_hash"]
+                or not record["readback_json"] or not json.loads(record["readback_json"]).get("matched")):
+            raise finance.DomainError("METRON_EMAIL_RECOVERY_NOT_READY")
+        try:
+            receipts = registry.receipts(db, record["id"])
+        except (registry.RegistryError, ValueError, KeyError, TypeError):
+            raise finance.DomainError("METRON_EMAIL_RECOVERY_NOT_READY") from None
+        if not any(item["binding"]["payload"] == json.loads(record["payload_json"])
+                   and item["binding"]["record_hash"] == record["record_hash"]
+                   and item["binding"]["content_hash"] == record["content_hash"]
+                   and item["binding"]["idempotency_key"] == record["idempotency_key"]
+                   and item["binding"]["status"] == record["status"] == "CONFIRMED"
+                   and item["binding"]["provider_tx_ref"] == record["provider_tx_ref"]
+                   and item["binding"]["tx_hash"] == record["tx_hash"]
+                   and item["binding"]["readback"] == json.loads(record["readback_json"])
+                   and item["binding"]["readback"].get("matched") is True for item in receipts):
+            raise finance.DomainError("METRON_EMAIL_RECOVERY_NOT_READY")
+    return {
+        "invoice_id": invoice_id,
+        "deal_id": deal_id,
+        "payment_entry_id": payment["id"],
+        "evidence_id": evidence[0]["id"],
+        "journal_id": journal[0]["id"],
+        "earned_capital_atomic": earned,
+        "registry_record_ids": [row["id"] for row in records],
+    }
+
+
 def _invoice_for_delivery(db: sqlite3.Connection, invoice_id: str, conversation: sqlite3.Row, recipient: str) -> sqlite3.Row:
     row = db.execute(
         "SELECT i.id,i.deal_id,i.status,d.status AS deal_status,c.external_ref "
@@ -621,6 +766,63 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
             return {"status": status, "offer_id": offer_id, "duplicate": False,
                     "unit_price_atomic": unit_price, "policy_fingerprint": fingerprint}
 
+    if action == "message-recover-reconciled":
+        _input(data, {"action", "account_email", "owner_token", "gmail_message_id"},
+               {"action", "account_email", "owner_token", "gmail_message_id"})
+        account = _email(data, "account_email")
+        owner = _text(data, "owner_token", 128)
+        message_id = _text(data, "gmail_message_id", 512)
+        with store.transaction(db):
+            _lock(db, account, owner)
+            message = db.execute(
+                "SELECT * FROM email_messages WHERE account_email=? AND gmail_message_id=?",
+                (account, message_id),
+            ).fetchone()
+            if message is None or message["direction"] != "INBOUND":
+                raise finance.DomainError("METRON_EMAIL_MESSAGE_NOT_FOUND")
+            recovered = db.execute(
+                "SELECT id FROM email_message_events WHERE account_email=? AND gmail_message_id=? "
+                "AND event_type='NO_ACTION' AND reason_code='FINANCE_AND_REGISTRY_CONFIRMED'",
+                (account, message_id),
+            ).fetchone()
+            if message["status"] == "PROCESSED" and recovered:
+                return {"status": "ALREADY_RECOVERED", "recovery_event_id": recovered["id"]}
+            if message["status"] != "FAILED" or message["error_code"] != "METRON_REGISTRY_GAS_BUDGET_APPROVAL_REQUIRED":
+                raise finance.DomainError("METRON_EMAIL_MESSAGE_NOT_RECOVERABLE")
+            if db.execute(
+                "SELECT 1 FROM email_message_events WHERE account_email=? AND gmail_message_id=? LIMIT 1",
+                (account, message_id),
+            ).fetchone():
+                raise finance.DomainError("METRON_EMAIL_MESSAGE_NOT_RECOVERABLE")
+            if db.execute(
+                "SELECT 1 FROM email_send_attempts WHERE account_email=? AND source_message_id=? LIMIT 1",
+                (account, message_id),
+            ).fetchone():
+                raise finance.DomainError("METRON_EMAIL_MESSAGE_NOT_RECOVERABLE")
+            conversation = _conversation(db, account, message["conversation_id"])
+            if not conversation["deal_id"]:
+                raise finance.DomainError("METRON_EMAIL_RECOVERY_NOT_READY")
+            invoice = db.execute("SELECT id FROM sales_invoices WHERE deal_id=?", (conversation["deal_id"],)).fetchall()
+            if len(invoice) != 1:
+                raise finance.DomainError("METRON_EMAIL_RECOVERY_NOT_READY")
+            evidence = _reconciled_recovery_evidence(db, invoice[0]["id"], conversation["deal_id"])
+            event_id = str(uuid.uuid4())
+            details = _json_object({
+                "original_error_code": message["error_code"],
+                **evidence,
+            })
+            db.execute(
+                "INSERT INTO email_message_events(id,account_email,gmail_message_id,conversation_id,event_type,reason_code,details_json,created_at,updated_at) "
+                "VALUES (?,?,?,?,'NO_ACTION','FINANCE_AND_REGISTRY_CONFIRMED',?,datetime('now'),datetime('now'))",
+                (event_id, account, message_id, message["conversation_id"], details),
+            )
+            db.execute(
+                "UPDATE email_messages SET status='PROCESSED',claimed_by=NULL,lease_until=NULL,processed_at=datetime('now'),error_code=NULL "
+                "WHERE id=? AND status='FAILED'",
+                (message["id"],),
+            )
+            return {"status": "RECOVERED", "recovery_event_id": event_id, **evidence}
+
     if action == "message-claim":
         _input(data, {"action", "account_email", "owner_token", "gmail_message_id", "gmail_thread_id", "customer_email", "lease_seconds"},
                {"action", "account_email", "owner_token", "gmail_message_id", "gmail_thread_id", "customer_email"})
@@ -678,6 +880,8 @@ def execute(db: sqlite3.Connection, data: dict) -> dict:
                         )
                         return {"status": "RECOVERED", "conversation_id": conversation["id"]}
                     return {"status": "DUPLICATE", "conversation_id": conversation["id"]}
+                if row["status"] == "FAILED" and row["error_code"] == "METRON_REGISTRY_GAS_BUDGET_APPROVAL_REQUIRED":
+                    return {"status": "RECOVERY_REQUIRED", "conversation_id": conversation["id"]}
                 if row["status"] == "PROCESSING" and row["claimed_by"] == owner:
                     return {"status": "ALREADY_CLAIMED", "conversation_id": conversation["id"]}
                 unresolved = db.execute(
