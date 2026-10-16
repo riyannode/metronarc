@@ -4,7 +4,7 @@
 
 > An agent should earn the right to spend more capital by proving that previous spending generated revenue.
 
-METRON is one plugin with four skills for Codex and compatible local AI hosts. `metron-policy` owns economic decisions and the finance CLI; `metron-email` autonomously operates customer conversations through the host's connected email and discovery tools; `metron-invoice` renders private PDF documents from persisted posted invoice data; and `metron-payment` guides authoritative Circle payment verification and reconciliation. All skills use the same local METRON state. METRON does not bundle an email transport, host an LLM, provide an MCP server, or run a remote backend.
+METRON is a chat-operated local plugin with four skills. `metron-policy` owns economic decisions and the finance CLI; `metron-email` operates customer conversations through the host's connected email and discovery tools; `metron-invoice` renders private PDFs from posted invoice data; and `metron-payment` guides Circle verification and reconciliation. METRON's Python runtime and SQLite state run locally; Circle CLI must be callable by that runtime. The Circle adapter can bridge WSL to a visible Windows CLI. Codex interactive chat is the verified workflow; ChatGPT desktop installation and local-thread execution remain **NOT VERIFIED** pending a clean desktop test. Browser/cloud ChatGPT and other hosts are not verified. METRON does not bundle email transport, host an LLM, provide an MCP server, or run a remote backend.
 
 ```mermaid
 flowchart LR
@@ -18,13 +18,23 @@ flowchart LR
 
 ## Current verification
 
-Circle Terms are never inferred from METRON use; see [Circle setup](docs/INSTALL.md#circle-setup) for the one-time explicit consent flow. Payment execution requires an authenticated Circle Agent Wallet and current Circle evidence. EconomicRegistry is METRON's shared non-custodial provenance contract on Arc Testnet at `0x547552585d8d995c5063820b2950e0db52b4cab4`. Contract deployment and read-only verification are not payment evidence. Synthetic fixtures do not prove live-provider behavior; testnet and synthetic records must remain labeled as such.
+Circle Terms are never inferred from METRON use; see [Circle setup](docs/INSTALL.md#set-up-circle-agent-wallet-with-your-ai-agent) for the one-time explicit consent flow. Payment execution requires an authenticated Circle Agent Wallet and current Circle evidence. EconomicRegistry is METRON's shared non-custodial provenance contract on Arc Testnet at `0x547552585d8d995c5063820b2950e0db52b4cab4`. Contract deployment and read-only verification are not payment evidence. Synthetic fixtures do not prove live-provider behavior; testnet and synthetic records must remain labeled as such.
 
 The [current E2E and submission evidence](docs/SUBMISSION.md) distinguishes the verified Arc Testnet customer workflow from post-revenue service purchases and public-hackathon requirements. The pilot buyer is a test scenario, not an independent customer; testnet receipts are not mainnet revenue.
 
-## Local quickstart
+## Chat-first setup
 
-Requirements: Python 3.11+, Bun for invoice PDF rendering, Circle CLI for provider operations, and Foundry for contract build/tests.
+You install METRON yourself in ChatGPT desktop: open Plugins, choose **Add marketplace from a repository**, add `riyannode/metronarc` at ref `master`, then install and enable the plugin. The repository is private, so your GitHub account must already have access. Use a local chat thread; the plugin requires desktop local execution to reach Circle CLI and `~/.metron/`.
+
+Start with **“Use METRON. Show status.”** Then ask the agent to check Circle wallet readiness. After setup, you can say **“Use METRON. Help me create a revenue goal and configure my financial policy.”** Review every value before saving. This prompt does not approve a deal or payment.
+
+Set up Circle CLI once where METRON's local runtime can call it. In WSL, check the existing Windows CLI bridge before installing another copy. The official installation and Circle Agent Wallet onboarding steps are in [Getting Started](docs/INSTALL.md), including Windows and WSL checks, Terms consent, local OTP prompt, existing-wallet check, and Arc Testnet session.
+
+The current pilot's final deal and escalated-spend approvals are direct operator instructions in interactive Codex chat. Do not treat a remote ChatGPT thread as able to inspect local state or provide those verified approval steps.
+
+## Developer CLI quickstart
+
+These Python commands are for developers and local troubleshooting. Business users should ask the agent in chat instead. Requirements: Python 3.11+, Circle CLI for provider operations, Bun for private invoice PDF rendering, and Foundry for optional contract build/tests.
 
 ```sh
 python3 -B skills/metron-policy/scripts/run.py init
@@ -37,21 +47,13 @@ Create a goal from a JSON file. Supply the target and explicitly choose the oper
 python3 -B skills/metron-policy/scripts/run.py goal-create --input goal.json
 ```
 
-All runtime state is stored under `~/.metron/`, outside the plugin source/cache. The read-only dashboard is generated at `~/.metron/dashboard.html` and shows the active goal, collected revenue, confirmed spend, net contribution, realized ROI, earned operating capital, spending and daily authorization limits, minimum Circle wallet balance, deal and approval counts, and latest records including open invoices. It does not show legacy account `1010` as a current balance.
-
-## Plugin install
-
-### Current manual path
-
-In ChatGPT desktop, open Plugins, add a marketplace from the repository `https://github.com/riyannode/metronarc` at ref `master`, install METRON, then start a fresh chat and ask “Set up METRON.”
-
-The repository is currently private. This path works only for GitHub accounts that already have repository access; public first-time installation remains blocked until the owner separately authorizes a visibility change.
+All runtime state is stored under `~/.metron/`, outside the plugin source/cache. The read-only dashboard is generated at `~/.metron/dashboard.html`; it is a local snapshot, not an interactive control panel in ChatGPT. Ask **“Open my METRON dashboard.”** to open the existing snapshot through the plugin.
 
 ### Future npm bootstrap
 
 Bootstrap CLI prepared for npm publication. After the package is published, run `npx @riyannode/metron`. The npm package only registers the GitHub marketplace and prints setup steps; the canonical plugin remains in this repository. This command is not available until npm publication.
 
-METRON is distributed as version `0.2.0` with four skills. Read-only persistence was verified in a genuinely new Codex task with the installed plugin; rerun after refreshing this branch's changes. Desktop-app plugin UI verification remains a separate check, and a new Python process alone is not a fresh-session test.
+METRON is distributed as version `0.2.0` with four skills. Read-only persistence was verified in a genuinely new Codex task with the installed plugin. A clean ChatGPT desktop installation and local-thread run remain a separate acceptance check; a new Python process alone is not a fresh-session test.
 
 ## Accounting semantics
 

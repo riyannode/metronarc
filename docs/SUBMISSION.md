@@ -45,6 +45,7 @@ No post-revenue Spend Intent or payment was created. The active earned-capital p
 
 | Acceptance area | Status | Evidence / limitation |
 |---|---|---|
+| ChatGPT desktop local execution | **CONFIGURED / NOT ACCEPTANCE-TESTED** | The repository has a local plugin marketplace and this branch declares `requires_local_executor`. A clean ChatGPT desktop install and local-thread operation have not been tested in this pass. |
 | Plugin installation | **PARTIAL** | Version `0.2.0`, four skills. The installed cache remains at the last merged source; this branch's `DELIVERABLE` action patch is not installed until reviewed/merged and explicitly refreshed. |
 | Policy and wallet | **PASS** | Circle reads 51.9 USDC in each of its native and ERC-20 Arc Testnet representations; they are not summed as one balance. Earned capital and hard caps are shown separately. |
 | Outgoing x402 | **PARTIAL** | Two Circle-confirmed pre-revenue expenses and journals exist. Neither is post-revenue reinvestment, and provider response artifacts are not durably retained. |
@@ -63,6 +64,7 @@ No post-revenue Spend Intent or payment was created. The active earned-capital p
 - No mainnet payment, independent customer, or post-revenue vendor purchase is evidenced.
 - Revenue EconomicRegistry provenance is `SKIPPED / NO_EXPLICIT_ATTRIBUTION`; do not describe revenue as committed on-chain.
 - Circle wallet limits are not assumed on Arc Testnet. METRON's policy and instruction-based human approval run locally and are not cryptographic isolation from the operator or host.
+- Codex interactive local chat is the recorded verification path. ChatGPT desktop must run a local thread to access Circle CLI and `~/.metron/`; browser/cloud chats and other hosts are not verified. The current local Circle CLI is 1.2.1 and does not show `--testnet`; Circle's latest package README at this audit lists 1.2.2 and documents that flag. No CLI update, authentication, Terms acceptance, wallet creation, or transaction was performed.
 - Test results, PDFs, and synthetic fixtures are not customer traction. Only the one Circle-reconciled Arc Testnet receipt is counted as payment evidence.
 - The repository is private, so external judges cannot currently clone or install it. Public visibility needs separate owner authorization and a secrets/PII review.
 - No video recording has been produced. Use [the demo storyboard](DEMO.md), record and inspect an under-three-minute video, then submit the public repository and video through the official event form before the posted deadline.
@@ -70,4 +72,4 @@ No post-revenue Spend Intent or payment was created. The active earned-capital p
 
 ## First-time user setup
 
-Follow [Local installation](INSTALL.md): install the marketplace plugin, confirm the four skills in a new host session, initialize only a brand-new `~/.metron/` ledger, configure the user's Circle Agent Wallet and explicit goal policy, and define each customer service through the operator-owned catalog. Circle Terms acceptance, wallet authentication, and any payment require the wallet owner's own authorized actions.
+Follow [Local installation](INSTALL.md): the user adds and enables the marketplace plugin, confirms the four skills in a new host session, initializes only a brand-new `~/.metron/` ledger, configures the Circle Agent Wallet and explicit goal policy, and defines each customer service through the operator-owned catalog. Circle Terms acceptance, wallet authentication, and any payment require the wallet owner's own authorized actions.
