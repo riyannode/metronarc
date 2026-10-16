@@ -32,9 +32,9 @@ Playwright starts and stops its own temporary server on port 4174. On Linux, Chr
 
 Invoice details and payment filters are interactive. Settings inputs are empty examples, stay in memory when switching screens, and can be reset. They never update METRON or Circle. The user-requested 80 USDC is labeled as an illustrative example balance. No live balance, private address, individual historical x402 amount, or additional activity is claimed.
 
-The former evidence spacer now contains the user's editorial photo, extended to 16:9 and matched to the site's blue-and-white palette. It fills the page width between Install and FAQ. Its default CSS treatment preserves the asset's detail and color, with a white fade only at the top and bottom edges. Responsive checks cover 360, 390, 761, 768, 1024, 1198, and 1440 px.
+The former evidence spacer now contains the user's editorial photo, extended to 16:9 and matched to the site's blue-and-white palette. It fills the page width between Install and FAQ. CSS applies 0.5 px blur, full opacity, 0.9 saturation, and 0.85 brightness, with a white fade only at the top and bottom edges. Responsive checks cover 360, 390, 761, 768, 1024, 1198, and 1440 px.
 
-The hero uses the supplied cloud workspace image as a decorative static background. A local overlay behind the copy supports text contrast, and a 96 px bottom fade joins the white section. Both images default to zero blur, full opacity, and unchanged saturation. Six scoped CSS custom properties in `src/styles.css` configure those effects independently; see [asset treatment](docs/assets.md#image-controls). Crop, scaling, and navigation/dashboard layout are preserved.
+The hero uses the supplied cloud workspace image as a decorative static background. A local overlay behind the copy supports text contrast, and a 96 px bottom fade joins the white section. The hero defaults to 0 px blur and the editorial photo to 0.5 px blur, both at full opacity, 0.9 saturation, and 0.85 brightness. Eight scoped CSS custom properties in `src/styles.css` configure those effects independently; see [asset treatment](docs/assets.md#image-controls). Crop, scaling, and navigation/dashboard layout are preserved.
 
 ## Static Vercel deployment
 

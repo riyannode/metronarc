@@ -317,14 +317,15 @@ test('the editorial image fills the former evidence slot at 16:9 on every screen
   }
 })
 
-test('image effects default to neutral and can be configured independently without changing geometry', async ({ page }) => {
+test('image effects use configured defaults and can be changed independently without changing geometry', async ({ page }) => {
   for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 884 })
     await page.goto('/')
     const hero = page.locator('.hero-backdrop img')
     const editorial = page.locator('.editorial-image')
+    await expect(hero).toHaveCSS('filter', 'blur(0px) saturate(0.9) brightness(0.85)')
+    await expect(editorial).toHaveCSS('filter', 'blur(0.5px) saturate(0.9) brightness(0.85)')
     for (const image of [hero, editorial]) {
-      await expect(image).toHaveCSS('filter', 'blur(0px) saturate(1)')
       await expect(image).toHaveCSS('opacity', '1')
     }
     const geometry = await page.locator('.hero-backdrop img, .editorial-image').evaluateAll(images => images.map(image => {
@@ -333,22 +334,24 @@ test('image effects default to neutral and can be configured independently witho
       return { width, height, position: style.objectPosition, transform: style.transform }
     }))
     await page.locator('.hero-backdrop').evaluate(element => {
-      element.style.setProperty('--hero-blur', '3px')
+      element.style.setProperty('--hero-blur', '4px')
       element.style.setProperty('--hero-opacity', '0.8')
-      element.style.setProperty('--hero-saturation', '0.7')
+      element.style.setProperty('--hero-saturation', '0.6')
+      element.style.setProperty('--hero-brightness', '0.95')
     })
-    await expect(hero).toHaveCSS('filter', 'blur(3px) saturate(0.7)')
+    await expect(hero).toHaveCSS('filter', 'blur(4px) saturate(0.6) brightness(0.95)')
     await expect(hero).toHaveCSS('opacity', '0.8')
-    await expect(editorial).toHaveCSS('filter', 'blur(0px) saturate(1)')
+    await expect(editorial).toHaveCSS('filter', 'blur(0.5px) saturate(0.9) brightness(0.85)')
     await expect(editorial).toHaveCSS('opacity', '1')
     await editorial.evaluate(element => {
       element.style.setProperty('--editorial-blur', '5px')
       element.style.setProperty('--editorial-opacity', '0.6')
       element.style.setProperty('--editorial-saturation', '0.5')
+      element.style.setProperty('--editorial-brightness', '0.75')
     })
-    await expect(editorial).toHaveCSS('filter', 'blur(5px) saturate(0.5)')
+    await expect(editorial).toHaveCSS('filter', 'blur(5px) saturate(0.5) brightness(0.75)')
     await expect(editorial).toHaveCSS('opacity', '0.6')
-    await expect(hero).toHaveCSS('filter', 'blur(3px) saturate(0.7)')
+    await expect(hero).toHaveCSS('filter', 'blur(4px) saturate(0.6) brightness(0.95)')
     await expect(hero).toHaveCSS('opacity', '0.8')
     expect(await page.locator('.hero-backdrop img, .editorial-image').evaluateAll(images => images.map(image => {
       const { width, height } = image.getBoundingClientRect()
