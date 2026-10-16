@@ -68,7 +68,7 @@ export default function HowItWorks() {
           <Reveal delay={0.3}><p className="mx-auto max-w-2xl text-[18px] leading-7 text-[#5C5C5D]">Define your limits, approve key decisions, and see every outcome.</p></Reveal>
         </div>
         <div className="grid grid-cols-1 items-start gap-12 lg:grid-cols-12 lg:gap-0">
-          <div className="flex flex-col lg:col-span-5 lg:border-r lg:border-[#EBEBEA] lg:pr-12" role="tablist" aria-label="METRON workflow" aria-orientation="vertical">
+          <div className="flex flex-col lg:col-span-5 lg:pr-12" role="tablist" aria-label="METRON workflow" aria-orientation="vertical">
             {steps.map((step, index) => (
               <div key={step.title}>
                 <Reveal delay={0.4 + index * 0.1} horizontal>

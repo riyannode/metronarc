@@ -1,5 +1,5 @@
 import { motion, useReducedMotion } from 'framer-motion'
-import { ArrowRight, ChevronRight, Play, ShieldCheck } from 'lucide-react'
+import { ArrowRight, Play, ShieldCheck } from 'lucide-react'
 import Dashboard from './Dashboard'
 
 export default function Hero() {
@@ -12,11 +12,6 @@ export default function Hero() {
       </div>
       <div aria-hidden="true" className="h-[60px]" />
       <div className="hero-copy relative z-10 mx-auto mb-[60px] mt-[120px] max-w-[820px] text-center">
-        <a href="#how-it-works" className="mb-8 inline-flex items-center gap-2 rounded-full border border-[#2775CA]/15 bg-white/60 px-3 py-1.5 backdrop-blur-sm transition-colors hover:border-[#2775CA]/50 sm:gap-3">
-          <span className="rounded-full bg-[#2775CA] px-2 py-0.5 text-[10px] tracking-tighter text-white">NEW</span>
-          <span className="text-[9px] font-medium tracking-[0.15em] text-[#161716]/60 sm:text-[11px]">AUTONOMOUS ECONOMIC OPERATIONS</span>
-          <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[#2775CA]/10 text-[#1D5FA8]"><ChevronRight size={10} strokeWidth={4} /></span>
-        </a>
         <h1 className="reference-heading mb-5 text-[40px] font-medium leading-[1.08] tracking-[-1.5px] md:text-[68px]">Give AI Agents <span className="text-[#2775CA]">Control of Your Business</span></h1>
         <p className="mx-auto mb-9 max-w-[580px] text-[17px] leading-[1.6] text-[#526174]">Set your financial rules. Your agent can find opportunities, pay for services, negotiate with customers, and collect USDC. METRON records every transaction</p>
         <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
