@@ -22,8 +22,7 @@ export default function Integrations() {
       <div className="absolute left-0 top-0 h-px w-full bg-gradient-to-r from-transparent via-[#2775CA]/15 to-transparent" />
       <div className="relative z-10 mx-auto flex w-full max-w-7xl flex-col items-center">
         <div className="mb-[60px] text-center">
-          <Reveal><span className="section-eyebrow mb-8"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#2775CA]" /> BUILT FOR THE AGENT ECONOMY</span></Reveal>
-          <Reveal><h2 id="integrations-title" className="reference-heading mx-auto max-w-4xl text-4xl font-medium leading-tight tracking-tight md:text-[52px]">Works With the Tools Behind<br className="hidden md:block" /> Autonomous Business</h2></Reveal>
+          <Reveal><h2 id="integrations-title" className="reference-heading mx-auto max-w-4xl text-4xl font-medium leading-tight tracking-tight md:text-[52px]">Connect Your AI Agent to Business Tools</h2></Reveal>
           <Reveal delay={0.2}><p className="mx-auto mt-4 max-w-[480px] text-base leading-relaxed text-[#161716]/50">METRON connects your agent to payment tools, customer email, and accounting you can verify.</p></Reveal>
         </div>
         <div className="marquee-mask relative w-full select-none overflow-hidden py-4" aria-label="Supported tools and components">

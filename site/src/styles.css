@@ -5,6 +5,7 @@
 }
 
 html { scroll-padding-top: 24px; }
+main#main > section[id] { scroll-margin-top: 88px; }
 body { margin: 0; background: #fff; color: #161716; font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }
 button, a { -webkit-tap-highlight-color: transparent; }
 button { cursor: pointer; }

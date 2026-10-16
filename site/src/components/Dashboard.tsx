@@ -155,6 +155,7 @@ export default function Dashboard() {
         </div>
       </div>
       <div className="pointer-events-none absolute bottom-0 left-0 z-20 h-[38%] w-full bg-gradient-to-t from-white via-white/60 to-transparent md:left-[80px] md:w-[calc(100%-80px)]" />
+      <div aria-hidden="true" className="pointer-events-none absolute bottom-0 left-0 z-20 hidden h-[7%] w-px bg-gradient-to-t from-white via-white/60 to-transparent md:block" />
     </div>
   )
 }

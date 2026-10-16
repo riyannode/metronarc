@@ -63,9 +63,9 @@ export default function HowItWorks() {
     <section id="how-it-works" aria-labelledby="how-title" className="how-section overflow-clip bg-white py-20 md:py-28">
       <div className="mx-auto max-w-[1280px] px-6">
         <div className="mx-auto mb-20 max-w-3xl text-center">
-          <Reveal delay={0.1}><span className="mb-6 inline-flex items-center gap-2 rounded-full bg-[#F6F7F6] px-3 py-1.5 text-[14px] font-medium text-[#5C5C5D]"><span className="h-2 w-2 rounded-full bg-[#2775CA]" /> How it works?</span></Reveal>
-          <Reveal delay={0.2}><h2 id="how-title" className="mb-6 text-[40px] font-medium leading-[1.1] tracking-tight text-[#161716] md:text-[56px]">A smarter way for<br className="hidden md:block" /> agents to do business</h2></Reveal>
-          <Reveal delay={0.3}><p className="mx-auto max-w-2xl text-[18px] leading-7 text-[#5C5C5D]">Set your rules and let your agent work.<br className="hidden md:block" /> Check the result at each step.</p></Reveal>
+          <Reveal delay={0.1}><span className="mb-6 inline-flex items-center gap-2 rounded-full bg-[#F6F7F6] px-3 py-1.5 text-[14px] font-medium text-[#5C5C5D]"><span className="h-2 w-2 rounded-full bg-[#2775CA]" /> How It Works</span></Reveal>
+          <Reveal delay={0.2}><h2 id="how-title" className="mb-6 text-[40px] font-medium leading-[1.1] tracking-tight text-[#161716] md:text-[56px]">Built Around Your Decisions</h2></Reveal>
+          <Reveal delay={0.3}><p className="mx-auto max-w-2xl text-[18px] leading-7 text-[#5C5C5D]">Define your limits, approve key decisions, and see every outcome.</p></Reveal>
         </div>
         <div className="grid grid-cols-1 items-start gap-12 lg:grid-cols-12 lg:gap-0">
           <div className="flex flex-col lg:col-span-5 lg:border-r lg:border-[#EBEBEA] lg:pr-12" role="tablist" aria-label="METRON workflow" aria-orientation="vertical">

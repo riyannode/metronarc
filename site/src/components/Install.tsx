@@ -15,7 +15,7 @@ export default function Install() {
       <div className="mx-auto max-w-[1100px]">
         <div className="mx-auto mb-16 max-w-3xl text-center">
           <Reveal><span className="section-eyebrow mb-8"><Github size={13} /> INSTALL THE METRON PLUGIN</span></Reveal>
-          <Reveal delay={0.1}><h2 id="install-title" className="reference-heading text-[40px] font-medium leading-[1.1] tracking-tight md:text-[56px]">One plugin<br />A whole new way to operate</h2></Reveal>
+          <Reveal delay={0.1}><h2 id="install-title" className="reference-heading text-[40px] font-medium leading-[1.1] tracking-tight md:text-[56px]">One Plugin. Run Your Business</h2></Reveal>
           <Reveal delay={0.2}><p className="mt-6 text-[17px] leading-relaxed text-[#5C5C5D]">Install from GitHub, then set your goal and financial rules</p></Reveal>
         </div>
         <div className="grid items-start gap-12 lg:grid-cols-2 lg:gap-20">

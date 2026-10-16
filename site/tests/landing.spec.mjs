@@ -2,28 +2,34 @@ import { test, expect } from '@playwright/test'
 
 test('navigation and CTAs resolve to real sections and documentation', async ({ page }) => {
   await page.goto('/')
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Give AI Agents Power to Run Business')
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Give AI Agents Control of Your Business')
   const referenceFont = await page.locator('#how-title').evaluate(element => ({ family: getComputedStyle(element).fontFamily, weight: getComputedStyle(element).fontWeight }))
   for (const heading of [page.getByRole('heading', { level: 1 }), page.locator('#integrations-title'), page.locator('#install-title'), page.locator('#faq-title'), page.getByRole('link', { name: 'METRON home', exact: true }), page.locator('footer').getByRole('link', { name: 'METRON', exact: true })]) {
     await expect(heading).toHaveCSS('font-family', referenceFont.family)
     await expect(heading).toHaveCSS('font-weight', referenceFont.weight)
   }
   const brandLinks = page.locator('nav > a[href="#overview"], footer a[href="#overview"]')
+  const mainNavigation = page.getByRole('navigation', { name: 'Main navigation' })
+  await expect(mainNavigation).toHaveCSS('position', 'fixed')
+  await expect(mainNavigation).toHaveCSS('border-top-left-radius', '9999px')
+  await page.evaluate(() => window.scrollTo(0, 700))
+  await expect.poll(() => mainNavigation.evaluate(element => Math.round(element.getBoundingClientRect().top))).toBe(10)
   await expect(brandLinks).toHaveCount(2)
   for (const link of await brandLinks.all()) {
     await expect(link).toHaveText('METRON')
     await expect(link.locator('img')).toHaveAttribute('src', '/brand/metron-mark.png')
   }
-  await expect(page.locator('#install-title')).toHaveText(/One plugin\s*A whole new way to operate/)
-  await expect(page.locator('#faq-title')).toHaveText(/Good questions\s*Clear boundaries/)
-  await expect(page.locator('#install-title')).not.toContainText('.')
+  await expect(page.locator('#install-title')).toHaveText('One Plugin. Run Your Business')
+  await expect(page.locator('#faq-title')).toHaveText('Frequently Asked Questions')
   await expect(page.locator('#faq-title')).not.toContainText('.')
   for (const link of await page.locator('a[href^="#"]').all()) {
     const href = await link.getAttribute('href')
     await expect(page.locator(href)).toHaveCount(1)
   }
   await expect(page.getByRole('link', { name: 'Install METRON', exact: true })).toHaveAttribute('href', '#install')
-  await expect(page.getByRole('link', { name: 'Documentation', exact: true }).first()).toHaveAttribute('href', '/docs')
+  await expect(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Docs', exact: true })).toHaveAttribute('href', '/docs')
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Install', exact: true }).click()
+  await expect.poll(() => page.locator('#install').evaluate(element => Math.round(element.getBoundingClientRect().top))).toBeGreaterThanOrEqual(88)
   await expect(page.locator('footer').getByRole('link', { name: 'Documentation' })).toHaveAttribute('href', '/docs')
   await expect(page.getByRole('link', { name: 'Read the installation guide' })).toHaveAttribute('href', '/docs/installation')
   await expect(page.getByRole('link', { name: 'riyannode/metronarc' })).toHaveAttribute('href', 'https://github.com/riyannode/metronarc')
