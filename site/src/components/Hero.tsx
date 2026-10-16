@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import { ArrowRight, ChevronRight, Menu, Play, ShieldCheck, X } from 'lucide-react'
 import { documentation, navigation } from '../content'
@@ -7,18 +7,13 @@ import Dashboard from './Dashboard'
 export default function Hero() {
   const [menuOpen, setMenuOpen] = useState(false)
   const toggle = useRef<HTMLButtonElement>(null)
-  const video = useRef<HTMLVideoElement>(null)
   const reduced = useReducedMotion()
-
-  useEffect(() => {
-    if (reduced) video.current?.pause()
-    else void video.current?.play().catch(() => undefined)
-  }, [reduced])
 
   return (
     <section id="overview" className="relative min-h-[1100px] overflow-hidden bg-white px-6 pt-[10px] md:px-12">
-      <video ref={video} src="/hero-blue.mp4" autoPlay loop muted playsInline preload="metadata" poster="/hero-poster.jpg" className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover opacity-70" aria-hidden="true" />
-      <div className="pointer-events-none absolute inset-0 z-0 bg-gradient-to-b from-white/65 via-white/40 to-white/95" />
+      <div aria-hidden="true" className="hero-backdrop pointer-events-none absolute inset-x-0 top-0 z-0 overflow-hidden">
+        <img src="/images/metron-cloud-workspace.webp" alt="" width={1672} height={941} fetchPriority="high" className="h-full w-full object-cover" />
+      </div>
       <nav aria-label="Main navigation" className="relative z-50 flex items-center justify-between gap-4 py-4" onKeyDown={(event) => { if (event.key === 'Escape') { setMenuOpen(false); toggle.current?.focus() } }}>
         <a href="#overview" aria-label="METRON home" className="reference-heading inline-flex shrink-0 items-center gap-2 text-[20px] font-medium tracking-tight"><img src="/brand/metron-mark.png" alt="" width={28} height={28} className="h-7 w-7 object-contain" />METRON</a>
         <div className="desktop-nav hidden items-center md:flex">
@@ -44,12 +39,12 @@ export default function Hero() {
           <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[#2775CA]/10 text-[#1D5FA8]"><ChevronRight size={10} strokeWidth={4} /></span>
         </a>
         <h1 className="reference-heading mb-5 text-[40px] font-medium leading-[1.08] tracking-[-1.5px] md:text-[68px]">Give AI Agents Power to <span className="text-[#2775CA]">Run  Business</span></h1>
-        <p className="mx-auto mb-9 max-w-[580px] text-[17px] leading-[1.6] text-[#161716]/55">Set your financial rules. Your agent can find opportunities, pay for services, negotiate with customers, and collect USDC. METRON records every transaction.</p>
+        <p className="mx-auto mb-9 max-w-[580px] text-[17px] leading-[1.6] text-[#526174]">Set your financial rules. Your agent can find opportunities, pay for services, negotiate with customers, and collect USDC. METRON records every transaction.</p>
         <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
           <motion.a href="#install" initial={{ opacity: 0, transform: reduced ? 'none' : 'translateY(10px)' }} animate={{ opacity: 1, transform: 'none' }} transition={{ delay: reduced ? 0 : 0.8 }} className="button primary-cta flex h-14 w-full items-center justify-center gap-3 rounded-full bg-[#2775CA] px-8 font-bold text-white sm:w-auto">Install METRON <ArrowRight size={18} /></motion.a>
           <motion.a href="#how-it-works" initial={{ opacity: 0, transform: reduced ? 'none' : 'translateY(10px)' }} animate={{ opacity: 1, transform: 'none' }} transition={{ delay: reduced ? 0 : 0.9 }} className="button secondary-cta flex h-14 w-full items-center justify-center gap-3 rounded-full border border-[#161716]/20 bg-white/30 px-8 font-semibold backdrop-blur-md sm:w-auto"><Play size={18} fill="currentColor" className="ml-0.5" /> See How It Works</motion.a>
         </div>
-        <p className="mt-6 flex items-center justify-center gap-2 text-[11px] text-[#161716]/45"><ShieldCheck size={13} className="text-[#1D5FA8]" /> The Economic Operating Layer for AI Agents</p>
+        <p className="mt-6 flex items-center justify-center gap-2 text-[11px] text-[#65758B]"><ShieldCheck size={13} className="text-[#1D5FA8]" /> The Economic Operating Layer for AI Agents</p>
       </div>
       <Dashboard />
     </section>

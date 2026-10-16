@@ -1,15 +1,12 @@
 # Asset provenance
 
-`public/hero-blue.mp4` and `public/hero-poster.jpg` were generated locally for this site. No third-party video, screenshot, avatar, or remote product image is embedded. The brief did not establish redistribution permission for the original CDN video, so it was replaced with a soft blue-and-white gradient video to follow the user's latest USDC palette reference. The reference's video placement, looping playback, opacity, depth overlays, and hero composition are retained.
+## Landing page photos
 
-Recreate these assets with FFmpeg:
+`public/images/metron-cloud-workspace.webp` is the user's supplied `Floating Workspace Above the Clouds.png`, converted at its original 1672 × 941 resolution to WebP (quality 0.86). The source composition and colors are preserved. CSS applies 1 px blur, reduced saturation, and blue-and-white overlays behind the hero text. It is decorative and loads with high priority.
 
-```sh
-ffmpeg -f lavfi -i 'gradients=size=1280x960:rate=24:c0=0xf5f9ff:c1=0x92baff:c2=0xffffff:c3=0xe0ecff:x0=0:y0=0:x1=1280:y1=960:nb_colors=4:speed=0.015:type=radial' -t 12 -c:v libx264 -preset fast -crf 26 -pix_fmt yuv420p -movflags +faststart -an public/hero-blue.mp4
-ffmpeg -i public/hero-blue.mp4 -frames:v 1 public/hero-poster.jpg
-```
+`public/images/metron-editorial.webp` was created with the built-in imagegen tool from the user's supplied portrait of a seated man surrounded by vintage monitors and research notes. The scene was extended horizontally to 1672 × 941 and given a cool blue-and-white treatment. It occupies the former Anatomy section at a full-width 16:9 ratio, with descriptive alt text and lazy loading. CSS adds 2 px blur, reduced saturation, 60% opacity, and pale blue edge fades.
 
-The video is decorative. A still poster remains available when autoplay is unavailable, and playback is paused for reduced-motion users.
+The previous locally generated gradient video and poster remain in `public/` but are no longer rendered. The photos are served locally; no remote image requests or runtime image-generation calls are used.
 
 Inter and Inter Tight are loaded through Google Fonts under their SIL Open Font License. They are the typefaces named in the reference. Lucide icons use the installed `lucide-react` package under its ISC license. The favicon is a local blue-and-white typographic M.
 

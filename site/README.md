@@ -32,7 +32,9 @@ Playwright starts and stops its own temporary server on port 4174. On Linux, Chr
 
 Invoice details and payment filters are interactive. Settings inputs are empty examples, stay in memory when switching screens, and can be reset. They never update METRON or Circle. The user-requested 80 USDC is labeled as an illustrative example balance. No live balance, private address, individual historical x402 amount, or additional activity is claimed.
 
-The evidence section is visually empty at the user's request. `Evidence.tsx` keeps its previous layout invisible, inert, and hidden from assistive technology to preserve the exact responsive height. Replace that spacer when adding the next component. Height checks cover 360, 390, 761, 768, 1024, 1198, and 1440 px.
+The former evidence spacer now contains the user's editorial photo, extended to 16:9 and matched to the site's blue-and-white palette. It fills the page width between Install and FAQ. CSS blur, reduced saturation, and soft edge fades keep it subdued. Responsive checks cover 360, 390, 761, 768, 1024, 1198, and 1440 px.
+
+The hero uses the supplied cloud workspace image as a decorative static background. Blur and blue-and-white overlays preserve text contrast; the image fades to white toward the dashboard. Neither photo changes the existing navigation or dashboard layout.
 
 ## Static Vercel deployment
 
@@ -52,6 +54,6 @@ The dashboard's bars are explicitly illustrative. Earned operating capital is an
 
 The reference FAQ repeated the integrations specification; this implementation includes one integrations section and one eight-question FAQ. The workflow preview is a scalable HTML/SVG illustration with the reference's fixed frame and transitions. The marketplace manifest and `docs/INSTALL.md` identify four skills. The repository is private, so installation currently requires existing GitHub access.
 
-See [asset provenance](docs/assets.md) for the local video substitution.
+See [asset provenance](docs/assets.md) for image sources and treatment.
 
 Latest copy: the hero reads “Give AI Agents Power to Run Business”. The Payments heading reads “Historical x402 payments”, without a numeric prefix. Both generic dollar icons use the supplied transparent USDC mark.

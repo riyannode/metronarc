@@ -129,12 +129,13 @@ test('mobile menu closes after navigation and Escape restores focus', async ({ p
   await expect(page.locator('#mobile-navigation')).toHaveCount(0)
 })
 
-test('reduced motion stops looping video and continuous motion', async ({ page }) => {
+test('reduced motion stops continuous motion and the hero uses a static image', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.goto('/')
   await expect(page.locator('.marquee-track')).toHaveCSS('animation-name', 'none')
   await expect(page.locator('.active-ring')).toHaveCSS('animation-name', 'none')
-  await expect.poll(() => page.locator('video').evaluate(video => video.paused)).toBe(true)
+  await expect(page.locator('#overview video')).toHaveCount(0)
+  await expect(page.locator('.hero-backdrop img')).toBeVisible()
 })
 
 test('page and local media load without console or asset errors', async ({ page }) => {
@@ -143,7 +144,7 @@ test('page and local media load without console or asset errors', async ({ page 
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
   page.on('response', response => { if (response.status() >= 400) errors.push(`${response.status()} ${response.url()}`) })
   await page.goto('/', { waitUntil: 'networkidle' })
-  await expect.poll(() => page.locator('video').evaluate(video => video.readyState)).toBeGreaterThanOrEqual(2)
+  expect(await page.locator('.hero-backdrop img').evaluate(async image => { await image.decode(); return image.naturalWidth })).toBeGreaterThan(1000)
   await page.getByRole('navigation', { name: 'Dashboard sections' }).getByRole('button', { name: 'Wallet', exact: true }).click()
   await expect(page.locator('[data-dashboard-screen="wallet"]').getByRole('img', { name: 'USDC', exact: true })).toHaveAttribute('src', '/brand/usdc.webp')
   await page.locator('#how-it-works').getByRole('tab').nth(2).click()
@@ -297,16 +298,21 @@ test('mobile dashboard content scrolls independently and every policy field is u
   await expect.poll(() => screen.evaluate(element => element.scrollTop)).toBe(0)
 })
 
-test('evidence space stays empty and preserves its original responsive height', async ({ page }) => {
-  for (const [width, height] of [[360, 994.125], [390, 956.75], [761, 561.125], [768, 644.125], [1024, 533.125], [1198, 513.625], [1440, 513.625]]) {
+test('the editorial image fills the former evidence slot at 16:9 on every screen', async ({ page }) => {
+  for (const width of [360, 390, 761, 768, 1024, 1198, 1440]) {
     await page.setViewportSize({ width, height: 884 })
-    await page.goto('/')
-    await page.evaluate(() => document.fonts.ready)
-    const evidence = page.locator('#evidence')
-    await expect(evidence).toHaveAttribute('aria-hidden', 'true')
-    await expect(evidence.getByRole('heading')).toHaveCount(0)
-    await expect(evidence.locator('a')).toBeHidden()
-    expect((await evidence.innerText()).trim()).toBe('')
-    expect(await evidence.evaluate(element => element.getBoundingClientRect().height)).toBeCloseTo(height, 1)
+    await page.goto('/#evidence')
+    const section = page.locator('#evidence')
+    const image = section.getByRole('img')
+    await section.scrollIntoViewIfNeeded()
+    await expect(image).toBeVisible()
+    expect(await image.evaluate(async element => { await element.decode(); return element.naturalWidth })).toBeGreaterThan(1000)
+    const bounds = await image.boundingBox()
+    expect(bounds.x).toBe(0)
+    expect(bounds.width).toBe(await page.evaluate(() => document.documentElement.clientWidth))
+    expect(bounds.width / bounds.height).toBeCloseTo(16 / 9, 3)
+    expect(await section.evaluate(element => [element.previousElementSibling.id, element.nextElementSibling.id])).toEqual(['install', 'faq'])
+    await expect(section.locator('.world-demo')).toHaveCount(0)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   }
 })
