@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from 'react'
 import { ArrowRight, ArrowUpRight, Check, Copy } from 'lucide-react'
 import { repository } from '../content'
+import MainNavigation from './MainNavigation'
+import SiteFooter from './SiteFooter'
 
 type DocsSection = { id: string; title: string; content: ReactNode }
 type DocsArticle = { label: string; title: string; intro: string; sections: DocsSection[] }
@@ -268,13 +270,7 @@ export default function DocsPage({ pathname }: { pathname: string }) {
   return (
     <div className="docs-page">
       <a href="#docs-main" className="skip-link">Skip to documentation</a>
-      <header className="docs-header">
-        <div className="docs-header__inner">
-          <a href="/" className="docs-brand" aria-label="METRON home"><img src="/brand/metron-mark.png" alt="" width="28" height="28" /> <span className="reference-heading">METRON</span></a>
-          <nav aria-label="Site navigation"><a href="/">Home</a><a href="/docs" aria-current="page">Documentation</a></nav>
-          <a className="docs-source-link" href={repository} target="_blank" rel="noreferrer">Source repository <ArrowUpRight size={14} /></a>
-        </div>
-      </header>
+      <MainNavigation landingPath="/" />
       <main className="docs-layout-page" id="docs-main">
         <div className="docs-layout">
           <aside className="docs-sidebar">
@@ -307,7 +303,7 @@ export default function DocsPage({ pathname }: { pathname: string }) {
           </aside>
         </div>
       </main>
-      <footer className="docs-footer"><a href="/">METRON</a><span>The Economic Operating Layer for AI Agents.</span></footer>
+      <SiteFooter homeHref="/#overview" />
     </div>
   )
 }

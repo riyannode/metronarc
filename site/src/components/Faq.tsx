@@ -11,6 +11,7 @@ export default function Faq() {
       <div className="pointer-events-none absolute left-1/2 top-0 h-[300px] w-[800px] -translate-x-1/2 rounded-full bg-[#2775CA]/[0.035] blur-[120px]" />
       <div className="relative mx-auto max-w-[800px]">
         <div className="mb-[60px] text-center">
+          <Reveal><span className="mb-6 inline-flex items-center gap-2 rounded-full bg-[#F6F7F6] px-3 py-1.5 text-[14px] font-medium text-[#5C5C5D]"><span className="h-2 w-2 rounded-full bg-[#2775CA]" /> FAQ</span></Reveal>
           <Reveal delay={0.1}><h2 id="faq-title" className="reference-heading text-[40px] font-medium leading-tight tracking-tight md:text-[52px]">Frequently Asked Questions</h2></Reveal>
           <Reveal delay={0.2}><p className="mt-4 text-[16px] leading-relaxed text-[#5C5C5D]">Everything you need to know about METRON</p></Reveal>
         </div>
