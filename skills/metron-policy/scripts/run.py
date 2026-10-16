@@ -16,6 +16,9 @@ import circle
 import email_state
 import finance
 import registry
+import registry_receipts
+import registry_deployment
+import registry_evidence
 import store
 
 DASHBOARD_TEMPLATE = Path(__file__).resolve().parents[3]/"dashboard"/"index.html"
@@ -30,7 +33,7 @@ DASHBOARD_REFRESH_OPERATIONS = frozenset({
 
 def parser() -> argparse.ArgumentParser:
     result=argparse.ArgumentParser(description="METRON local economic control and ledger")
-    result.add_argument("operation",nargs="?",choices=("init","status","config-set","contract-address","goal-create","goal-get","spend-propose","spend-approve","spend-estimate","spend-execute","service-search","service-inspect","circle-terms-status","circle-terms-accept","preflight","wallet-list","wallet-balance","deal-create","deal-get","deal-update","deal-accept","deal-approve","deal-reject","deal-payment-terms-confirm","invoice-create","invoice-post","invoice-get","payment-sync","payment-reconcile","registry-sync","registry-recover-spend","journal-list","payment-list","events","dashboard","email-state"))
+    result.add_argument("operation",nargs="?",choices=("init","status","config-set","contract-address","goal-create","goal-get","spend-propose","spend-approve","spend-estimate","spend-execute","service-search","service-inspect","circle-terms-status","circle-terms-accept","preflight","wallet-list","wallet-balance","deal-create","deal-get","deal-update","deal-accept","deal-approve","deal-reject","deal-payment-terms-confirm","invoice-create","invoice-post","invoice-get","payment-sync","payment-reconcile","registry-activate","registry-resume","registry-sync","registry-recover-spend","registry-recover-revenue","registry-audit-attribution","registry-link","registry-receipts","registry-verify-receipt","journal-list","payment-list","events","dashboard","email-state"))
     result.add_argument("--input",help="Path to a JSON input document")
     result.add_argument("--id",help="METRON entity ID")
     result.add_argument("--provider-ref",help="Circle transaction ID or hash for payment reconciliation")
@@ -63,11 +66,15 @@ def set_spend_unknown(intent_id: str, provider_ref: str | None=None, provider_am
         store.event(db,event,"spend_intent",intent_id,"Circle payment outcome requires authoritative reconciliation",{"provider_ref":provider_ref},finance.now())
 
 
-def registry_after_spend(db, intent_id: str) -> dict:
+def registry_after_spend(db, intent_id: str, response=None) -> dict:
     try:
+        fulfillment=registry_evidence.capture(db,intent_id,response) if response is not None else None
         record=registry.record_spend(db,intent_id)
-        if record.get("status") in {"FAILED","SKIPPED"}: return record
-        return registry.sync(db,record["id"])
+        if fulfillment: record["fulfillment_id"]=fulfillment["id"]
+        if record.get("status") in {"FAILED","SKIPPED","DEFERRED"}: return record
+        result=registry.sync(db,record["id"])
+        if fulfillment: result["fulfillment_id"]=fulfillment["id"]
+        return result
     except Exception:
         return {"records":[{"status":"UNKNOWN","error_code":"METRON_REGISTRY_RECONCILIATION_FAILED"}]}
 
@@ -75,8 +82,8 @@ def registry_after_spend(db, intent_id: str) -> dict:
 def registry_after_revenue(db, invoice_id: str, earned_capital_atomic: int) -> dict:
     try:
         record=registry.record_revenue(db,invoice_id,earned_capital_atomic)
-        if record.get("status") in {"FAILED","SKIPPED"}: return record
-        return registry.sync(db)
+        if record.get("status") in {"FAILED","SKIPPED","DEFERRED"}: return record
+        return registry.sync_revenue(db,invoice_id)
     except Exception:
         return {"records":[{"status":"UNKNOWN","error_code":"METRON_REGISTRY_RECONCILIATION_FAILED"}]}
 
@@ -91,11 +98,7 @@ def build_dashboard(db) -> str:
         "FROM payment_evidence e JOIN payment_entries p ON p.id=e.payment_entry_id "
         "ORDER BY e.rowid DESC LIMIT 10"
     ).fetchall()]
-    tables["registry_records"]=[dict(row) for row in db.execute(
-        "SELECT record_type,source_entity_id,chain,contract_address,status,tx_hash,confirmed_at "
-        "FROM registry_records WHERE chain=? AND contract_address=? ORDER BY created_at DESC LIMIT 10",
-        (status["economic_registry"]["chain"],status["economic_registry"]["contract_address"]),
-    ).fetchall()]
+    tables["registry_records"]=status["economic_registry"]["latest_records"]
     for journal in tables["journal_entries"]:
         journal["lines"]=db.execute("SELECT account_code,debit_atomic,credit_atomic,currency FROM journal_lines WHERE journal_entry_id=?",(journal["id"],)).fetchall()
 
@@ -212,6 +215,7 @@ def build_dashboard(db) -> str:
     registry_header=("<section class='panel' id='economic-registry'><div class='section-heading'><div><p class='eyebrow'>IMMUTABLE PROVENANCE</p>"
         f"<h2>EconomicRegistry · {html.escape(registry_state['activation_status'])}</h2></div></div>"
         f"<p>Chain: {html.escape(registry_state['chain'])} · Contract: <span class='mono'>{html.escape(registry_state['contract_address'])}</span></p>"
+        f"<p class='note'>{registry_state['deferred_count']} deferred provenance source(s) await verified activation or explicit resume.</p>"
         "<p class='note'>Non-custodial provenance mirror. SQLite, the journal, and authoritative Circle reconciliation remain business truth.</p></section>")
     sections.append(registry_header+table("Registry records",tables["registry_records"],[
         ("Type","record_type","text"),("Source","source_entity_id","mono"),("Status","status","state"),
@@ -271,6 +275,7 @@ def execute(args: argparse.Namespace) -> object:
     if operation=="circle-terms-accept":
         if data!={"confirmed":True}: raise finance.DomainError("METRON_CIRCLE_TERMS_CONSENT_REQUIRED")
         return circle.accept_terms()
+    if operation=="registry-verify-receipt": return registry_receipts.verify(data)
     if operation=="init": return store.initialize()
     if operation=="email-state":
         if not store.DATABASE.is_file(): raise finance.DomainError("METRON_NOT_INITIALIZED")
@@ -287,14 +292,21 @@ def execute(args: argparse.Namespace) -> object:
             return email_state.execute(db,data)
     store.initialize()
     if operation=="config-set":
-        allowed={"chain","operating_wallet"}
+        allowed={"chain","operating_wallet","registry_v3_address","registry_v3_enabled"}
         if set(data)-allowed: raise finance.DomainError("METRON_INVALID_INPUT")
         if data.get("chain", "ARC-TESTNET") != "ARC-TESTNET": raise finance.DomainError("METRON_UNSUPPORTED_CHAIN")
-        for key in ("operating_wallet",):
+        for key in ("operating_wallet", "registry_v3_address"):
             value=data.get(key)
-            if value is not None and (not isinstance(value,str) or len(value)!=42 or not value.startswith("0x") or any(ch not in "0123456789abcdefABCDEF" for ch in value[2:])):
+            if key in data and (not isinstance(value,str) or len(value)!=42 or not value.startswith("0x") or any(ch not in "0123456789abcdefABCDEF" for ch in value[2:])):
                 raise finance.DomainError("METRON_INVALID_INPUT")
-        config=store.read_config(); config.update(data); store.write_config(config)
+        if "registry_v3_enabled" in data and not isinstance(data["registry_v3_enabled"],bool): raise finance.DomainError("METRON_INVALID_INPUT")
+        if data.get("registry_v3_address", "").lower() == registry.V2_ADDRESS: raise finance.DomainError("METRON_REGISTRY_CONTRACT_MISMATCH")
+        if data.get("registry_v3_address") and int(data["registry_v3_address"],16)==0: raise finance.DomainError("METRON_INVALID_INPUT")
+        config=store.read_config(); config.update(data)
+        if config.get("registry_v3_enabled") and not config.get("registry_v3_address"): raise finance.DomainError("METRON_REGISTRY_V3_NOT_CONFIGURED")
+        if config.get("registry_v3_enabled") and not registry_deployment.approved(config): raise registry.RegistryError("METRON_REGISTRY_ACTIVATION_REQUIRED")
+        if data.get("registry_v3_enabled") is True: raise registry.RegistryError("METRON_REGISTRY_ACTIVATION_REQUIRED")
+        store.write_config(config)
         return {"chain":config.get("chain","ARC-TESTNET"),"operating_wallet_configured":bool(config.get("operating_wallet"))}
     with store.connect() as db:
         if operation=="status":
@@ -371,7 +383,7 @@ def execute(args: argparse.Namespace) -> object:
                 if record["status"]=="FAILED":
                     return {"record":record,"service_response":metadata["response"]}
                 if record["status"]!="CONFIRMED": raise circle.CircleError("METRON_PAYMENT_AMBIGUOUS")
-                registry_result=registry_after_spend(db,intent_id)
+                registry_result=registry_after_spend(db,intent_id,metadata["response"])
                 return {"record":record,"registry":registry_result,"service_response":metadata["response"]}
             except (circle.CircleError,finance.DomainError):
                 set_spend_unknown(intent_id,provider_ref,provider_amount)
@@ -426,10 +438,25 @@ def execute(args: argparse.Namespace) -> object:
             if record.get("status")=="PAID":
                 record["registry"]=registry_after_revenue(db,invoice_id,record["earned_capital_atomic"])
             return record
+        if operation=="registry-activate": return registry_deployment.activate(data.get("registry_address"),operator_confirmed=data.get("operator_confirmed") is True)
+        if operation=="registry-resume": return registry.resume(db,args.id,operator_confirmed=data.get("operator_confirmed") is True)
         if operation=="registry-sync": return registry.sync(db,args.id)
         if operation=="registry-recover-spend":
             if not (args.id or "").startswith("SI-"): raise finance.DomainError("METRON_SPEND_NOT_FOUND")
-            return registry.recover_spend(db,args.id)
+            return registry.recover_spend(db,args.id,operator_confirmed=read_input(args.input).get("operator_confirmed") is True)
+        if operation=="registry-recover-revenue":
+            return registry.recover_revenue(db,args.id,operator_confirmed=read_input(args.input).get("operator_confirmed") is True)
+        if operation=="registry-audit-attribution":
+            row=db.execute("SELECT payload_json FROM registry_v3_records WHERE id=?",(args.id,)).fetchone()
+            if row is None: raise registry.RegistryError("METRON_REGISTRY_RECORD_NOT_FOUND")
+            payload=json.loads(row[0])
+            if payload["schema"]!="metron.attribution/1": raise registry.RegistryError("METRON_REGISTRY_RELATIONSHIP_INVALID")
+            return registry_evidence.audit(db,payload["data"]["basis"]["evidence_hash"])
+        if operation=="registry-link":
+            data=read_input(args.input)
+            if data.get("operator_confirmed") is not True: raise finance.DomainError("METRON_REGISTRY_HISTORY_APPROVAL_REQUIRED")
+            return registry.link(db,data.get("from_id"),data.get("to_id"),data.get("evidence"))
+        if operation=="registry-receipts": return registry.receipts(db,args.id)
         if operation=="journal-list":
             rows=finance.listing(db,"journal_entries",args.limit)
             for row in rows: row["lines"]=[dict(line) for line in db.execute("SELECT account_code,debit_atomic,credit_atomic,currency FROM journal_lines WHERE journal_entry_id=?",(row["id"],))]
@@ -454,7 +481,7 @@ def main() -> int:
         return 0
     except finance.DomainError as exc:
         code=exc.code
-    except circle.CircleError as exc:
+    except (circle.CircleError,registry.RegistryError) as exc:
         code=exc.code
     except sqlite3.IntegrityError:
         code="METRON_CONFLICT"

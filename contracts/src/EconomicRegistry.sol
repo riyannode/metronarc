@@ -1,94 +1,97 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
 
-/// @notice Immutable, caller-namespaced commitments to locally reconciled economic activity.
+/// @notice Wallet commitments establish provenance, not independent verification of economic claims.
 contract EconomicRegistry {
-    string public constant VERSION = "2";
+    uint256 public constant VERSION = 3;
+    bytes32 private constant FACT_DOMAIN = sha256("METRON_FACT_ID_V3");
+    bytes32 private constant RELATION_DOMAIN = sha256("METRON_RELATION_ID_V3");
 
-    struct SpendRecord {
-        address operatingWallet;
-        bytes32 goalHash;
-        bytes32 spendIntentHash;
-        bytes32 paymentEvidenceHash;
-        uint256 amount;
-        uint256 recordedAt;
-        uint256 revenueCount;
-    }
-
-    struct RevenueRecord {
-        bytes32 spendId;
-        bytes32 revenueEvidenceHash;
-        uint256 revenueAmount;
-        uint256 earnedCapital;
+    struct Fact {
+        bytes32 factType;
+        bytes32 schemaHash;
+        bytes32 evidenceId;
+        bytes32 contentHash;
         uint256 recordedAt;
     }
 
-    error InvalidSpendRecord();
-    error SpendAlreadyRecorded(address operatingWallet, bytes32 spendId);
-    error SpendNotFound(address operatingWallet, bytes32 spendId);
-    error RevenueAlreadyRecorded(address operatingWallet, bytes32 revenueEvidenceHash);
-    error InvalidRevenueRecord();
-
-    mapping(address => mapping(bytes32 => SpendRecord)) public spendRecords;
-    mapping(address => mapping(bytes32 => mapping(bytes32 => RevenueRecord))) public revenueRecords;
-    mapping(address => mapping(bytes32 => bool)) public usedRevenueEvidence;
-
-    event SpendRecorded(
-        address indexed operatingWallet,
-        bytes32 indexed spendId,
-        bytes32 goalHash,
-        bytes32 spendIntentHash,
-        bytes32 paymentEvidenceHash,
-        uint256 amount,
-        uint256 recordedAt
-    );
-    event RevenueRecorded(
-        address indexed operatingWallet,
-        bytes32 indexed spendId,
-        bytes32 indexed revenueEvidenceHash,
-        uint256 revenueAmount,
-        uint256 earnedCapital,
-        uint256 recordedAt
-    );
-
-    function recordSpend(
-        bytes32 spendId,
-        bytes32 goalHash,
-        bytes32 spendIntentHash,
-        bytes32 paymentEvidenceHash,
-        uint256 amount
-    ) external {
-        if (
-            msg.sender == address(0) || spendId == bytes32(0) || goalHash == bytes32(0) || spendIntentHash == bytes32(0)
-                || paymentEvidenceHash == bytes32(0) || amount == 0
-        ) revert InvalidSpendRecord();
-        if (spendRecords[msg.sender][spendId].operatingWallet != address(0)) {
-            revert SpendAlreadyRecorded(msg.sender, spendId);
-        }
-
-        uint256 timestamp = block.timestamp;
-        spendRecords[msg.sender][spendId] =
-            SpendRecord(msg.sender, goalHash, spendIntentHash, paymentEvidenceHash, amount, timestamp, 0);
-        emit SpendRecorded(msg.sender, spendId, goalHash, spendIntentHash, paymentEvidenceHash, amount, timestamp);
+    struct Relationship {
+        bytes32 relationType;
+        bytes32 schemaHash;
+        bytes32 fromFact;
+        bytes32 toFact;
+        bytes32 contentHash;
+        uint256 recordedAt;
     }
 
-    function recordRevenue(bytes32 spendId, bytes32 revenueEvidenceHash, uint256 revenueAmount, uint256 earnedCapital)
+    mapping(address => mapping(bytes32 => Fact)) public facts;
+    mapping(address => mapping(bytes32 => Relationship)) public relationships;
+    mapping(address => mapping(bytes32 => bytes32)) public evidenceFacts;
+
+    error InvalidCommitment();
+    error InvalidIdentity();
+    error AlreadyRecorded();
+    error EvidenceAlreadyUsed();
+    error FactNotFound();
+
+    event FactRecorded(
+        address indexed wallet,
+        bytes32 indexed factId,
+        bytes32 indexed factType,
+        bytes32 schemaHash,
+        bytes32 evidenceId,
+        bytes32 contentHash
+    );
+    event RelationshipRecorded(
+        address indexed wallet,
+        bytes32 indexed relationId,
+        bytes32 indexed relationType,
+        bytes32 schemaHash,
+        bytes32 fromFact,
+        bytes32 toFact,
+        bytes32 contentHash
+    );
+
+    function recordFact(bytes32 factId, bytes32 factType, bytes32 schemaHash, bytes32 evidenceId, bytes32 contentHash)
         external
     {
-        SpendRecord storage spend = spendRecords[msg.sender][spendId];
-        if (spend.operatingWallet == address(0)) revert SpendNotFound(msg.sender, spendId);
-        if (revenueEvidenceHash == bytes32(0) || revenueAmount == 0 || earnedCapital > revenueAmount) {
-            revert InvalidRevenueRecord();
+        if (factType == bytes32(0) || schemaHash == bytes32(0) || evidenceId == bytes32(0) || contentHash == bytes32(0))
+        {
+            revert InvalidCommitment();
         }
-        if (usedRevenueEvidence[msg.sender][revenueEvidenceHash]) {
-            revert RevenueAlreadyRecorded(msg.sender, revenueEvidenceHash);
+        if (factId != sha256(abi.encode(FACT_DOMAIN, block.chainid, address(this), msg.sender, factType, evidenceId))) {
+            revert InvalidIdentity();
         }
+        if (facts[msg.sender][factId].contentHash != bytes32(0)) revert AlreadyRecorded();
+        if (evidenceFacts[msg.sender][evidenceId] != bytes32(0)) revert EvidenceAlreadyUsed();
+        facts[msg.sender][factId] = Fact(factType, schemaHash, evidenceId, contentHash, block.timestamp);
+        evidenceFacts[msg.sender][evidenceId] = factId;
+        emit FactRecorded(msg.sender, factId, factType, schemaHash, evidenceId, contentHash);
+    }
 
-        uint256 timestamp = block.timestamp;
-        usedRevenueEvidence[msg.sender][revenueEvidenceHash] = true;
-        spend.revenueCount += 1;
-        revenueRecords[msg.sender][spendId][revenueEvidenceHash] =
-            RevenueRecord(spendId, revenueEvidenceHash, revenueAmount, earnedCapital, timestamp);
-        emit RevenueRecorded(msg.sender, spendId, revenueEvidenceHash, revenueAmount, earnedCapital, timestamp);
+    function recordRelationship(
+        bytes32 relationId,
+        bytes32 relationType,
+        bytes32 schemaHash,
+        bytes32 fromFact,
+        bytes32 toFact,
+        bytes32 contentHash
+    ) external {
+        if (relationType == bytes32(0) || schemaHash == bytes32(0) || contentHash == bytes32(0) || fromFact == toFact) revert InvalidCommitment();
+        if (
+            facts[msg.sender][fromFact].contentHash == bytes32(0) || facts[msg.sender][toFact].contentHash == bytes32(0)
+        ) revert FactNotFound();
+        if (
+            relationId
+                != sha256(
+                    abi.encode(
+                        RELATION_DOMAIN, block.chainid, address(this), msg.sender, relationType, fromFact, toFact
+                    )
+                )
+        ) revert InvalidIdentity();
+        if (relationships[msg.sender][relationId].contentHash != bytes32(0)) revert AlreadyRecorded();
+        relationships[msg.sender][relationId] =
+            Relationship(relationType, schemaHash, fromFact, toFact, contentHash, block.timestamp);
+        emit RelationshipRecorded(msg.sender, relationId, relationType, schemaHash, fromFact, toFact, contentHash);
     }
 }

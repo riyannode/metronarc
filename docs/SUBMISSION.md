@@ -32,7 +32,7 @@ All amounts below are Arc **Testnet** USDC, not mainnet revenue or production cu
 | Reinvestment accounting | The persisted 10% policy allocated 2.20 USDC of reconciled receipts to earned operating capital. This is a local policy allocation, not a separate wallet or an additional payment. |
 | Customer fulfillment | A four-page research report was sent as a Gmail reply in the existing thread. The local artifact is 86,554 bytes with SHA-256 `699ef0478c44a74a3f6a03724b3172ffe35b270d783ce5fb109646847ea80a31`. Gmail readback matched the message/thread, PDF filename, MIME type, and byte size; the durable `DELIVERABLE` action is `CONFIRMED`. The report is a local/private deliverable artifact, not included in this repository. |
 | Historical x402 expenses | `SI-000001` (AuraGate Oracle Check, 0.005 USDC) and `SI-000002` (QuickNode Arc Testnet RPC, 0.0001 USDC) used `GatewayWalletBatched`. Their confirmed Circle evidence, Payment Entries `PE-000001`/`PE-000002`, Evidence `EV-000001`/`EV-000002`, and balanced expense journals `JE-000001`/`JE-000002` predate the incoming revenue. They are **not** post-revenue self-funding evidence. Their service response payloads are not retained as durable deliverable artifacts in SQLite. |
-| EconomicRegistry | `REG-000001` and `REG-000002` are confirmed SPEND provenance records. No revenue record was committed: revenue attribution was skipped because the deal has no explicit originating Spend Intent (`NO_EXPLICIT_ATTRIBUTION`). This provenance status does not change the PAID invoice or accounting. |
+| Historical V2 EconomicRegistry | `REG-000001` and `REG-000002` are confirmed SPEND provenance records. No revenue record was committed: revenue attribution was skipped because the deal has no explicit originating Spend Intent (`NO_EXPLICIT_ATTRIBUTION`). This provenance status does not change the PAID invoice or accounting. |
 | Persistence and recovery | The current ledger passes SQLite `integrity_check`. The account lock was released after delivery. The prior email send remains `UNKNOWN`; two old inbound messages remain `PROCESSING`. Neither state was changed or retried. The dashboard was regenerated from SQLite. |
 
 The research artifact's cited source URLs and examination date are inside the PDF. Current pricing is a dated public-page snapshot, not a quote. The report separates vendor-published facts from analysis and recommendations; its statements about Indonesian demand and language quality are not presented as measured market data.
@@ -45,10 +45,9 @@ No post-revenue Spend Intent or payment was created. The active earned-capital p
 
 | Acceptance area | Status | Evidence / limitation |
 |---|---|---|
-| ChatGPT desktop local execution | **CONFIGURED / NOT ACCEPTANCE-TESTED** | The repository has a local plugin marketplace and this branch declares `requires_local_executor`. A clean ChatGPT desktop install and local-thread operation have not been tested in this pass. |
-| Plugin installation | **PARTIAL** | Version `0.2.0`, four skills. The installed cache remains at the last merged source; this branch's `DELIVERABLE` action patch is not installed until reviewed/merged and explicitly refreshed. |
+| Plugin installation | **PASS** | METRON `0.2.0` is installed and enabled in Codex interactive chat. Post-merge source/marketplace/cache verification matched all 47 files to `dccb9c4497534118841f3819366362725b15b7be`; four skills loaded in a new session. V3 feature code is not installed. |
 | Policy and wallet | **PASS** | Circle reads 51.9 USDC in each of its native and ERC-20 Arc Testnet representations; they are not summed as one balance. Earned capital and hard caps are shown separately. |
-| Outgoing x402 | **PARTIAL** | Two Circle-confirmed pre-revenue expenses and journals exist. Neither is post-revenue reinvestment, and provider response artifacts are not durably retained. |
+| Historical x402 payments | **PASS** | Two Circle-confirmed pre-revenue expenses and journals exist. Post-revenue x402 was not executed, and historical service-output artifacts are not durably retained; no V3 attribution is inferred. |
 | Gmail negotiation | **PASS** | The existing thread contains a confirmed 22 USDC offer, customer acceptance, and buyer-confirmed invoice terms. A prior separate reply action stays `UNKNOWN`. |
 | Human approval | **PASS** | The deal's final human approval is persisted separately from customer acceptance. |
 | Invoice and Gmail delivery | **PASS** | Invoice `INV-000001` is PAID; original invoice message and final deliverable message are read back in the existing thread. |
@@ -56,20 +55,27 @@ No post-revenue Spend Intent or payment was created. The active earned-capital p
 | Accounting and journals | **PASS** | Payment and expense evidence are unique; posted journals are balanced; reinvestment is 2.20 USDC. |
 | Customer fulfillment | **PASS** | Four-page report artifact and confirmed Gmail outbox/readback; test buyer is not independent traction. Gmail exposes no attachment checksum, so provider readback was verified by filename, MIME type, and size against the hashed local artifact. |
 | Post-revenue reinvestment x402 | **BLOCKED** | Current per-action and daily caps are 0.0001 USDC; Marketplace search found no useful configured-network candidate within policy. No Spend Intent exists and no payment was attempted. |
-| Fresh-session recovery | **PASS** | A separate, genuinely new Codex task loaded installed METRON `0.2.0` (source `b7c36a96ce18c065d120657dbcf4f5ae604ef804`) and read the existing SQLite state without initializing or mutating it. Deal, invoice, payment entries/evidence, journals, registry records, four skills, and dashboard totals remained available; SQLite integrity passed. The task left the prior `UNKNOWN` send and two `PROCESSING` inbound messages unchanged. This verifies persistence under the installed baseline only; the branch-only `DELIVERABLE` outbox patch is not in the installed cache yet. |
+| Fresh-session recovery | **PASS** | A new Codex interactive session loaded all four installed skills and recovered the existing SQLite ledger after merge `dccb9c4497534118841f3819366362725b15b7be`. Integrity and persisted finance/email/registry state passed; unresolved sends were preserved. This existing E2E evidence concerns the installed baseline, not undeployed V3. |
 | Tameion submission readiness | **BLOCKED** | The repository is currently private and no recorded demo exists. Current event instructions require a public GitHub link and recorded video under three minutes; a deployment link is optional. Do not make the repository public or claim a video until those steps are separately authorized and completed. |
 
 ## Limitations and submission steps
 
 - No mainnet payment, independent customer, or post-revenue vendor purchase is evidenced.
-- Revenue EconomicRegistry provenance is `SKIPPED / NO_EXPLICIT_ATTRIBUTION`; do not describe revenue as committed on-chain.
+- Historical V2 revenue EconomicRegistry provenance is `SKIPPED / NO_EXPLICIT_ATTRIBUTION`; do not describe revenue as committed on-chain.
 - Circle wallet limits are not assumed on Arc Testnet. METRON's policy and instruction-based human approval run locally and are not cryptographic isolation from the operator or host.
-- Codex interactive local chat is the recorded verification path. ChatGPT desktop must run a local thread to access Circle CLI and `~/.metron/`; browser/cloud chats and other hosts are not verified. The current local Circle CLI is 1.2.1 and does not show `--testnet`; Circle's latest package README at this audit lists 1.2.2 and documents that flag. No CLI update, authentication, Terms acceptance, wallet creation, or transaction was performed.
 - Test results, PDFs, and synthetic fixtures are not customer traction. Only the one Circle-reconciled Arc Testnet receipt is counted as payment evidence.
 - The repository is private, so external judges cannot currently clone or install it. Public visibility needs separate owner authorization and a secrets/PII review.
 - No video recording has been produced. Use [the demo storyboard](DEMO.md), record and inspect an under-three-minute video, then submit the public repository and video through the official event form before the posted deadline.
-- Re-test a fresh Codex session after the approved branch is merged and the installed plugin is refreshed. Keep `plugin.json` at `0.2.0` unless a separately approved release plan requires a version change.
+- V3 deployment, installation and live acceptance require a separate approved rollout. Existing Codex baseline verification stays PASS; do not repeat payments or reset state. Keep `plugin.json` at `0.2.0` unless a separately approved release plan requires a version change.
 
 ## First-time user setup
 
-Follow [Local installation](INSTALL.md): the user adds and enables the marketplace plugin, confirms the four skills in a new host session, initializes only a brand-new `~/.metron/` ledger, configures the Circle Agent Wallet and explicit goal policy, and defines each customer service through the operator-owned catalog. Circle Terms acceptance, wallet authentication, and any payment require the wallet owner's own authorized actions.
+Follow [Local installation](INSTALL.md): install the marketplace plugin, confirm the four skills in a new host session, initialize only a brand-new `~/.metron/` ledger, configure the user's Circle Agent Wallet and explicit goal policy, and define each customer service through the operator-owned catalog. Circle Terms acceptance, wallet authentication, and any payment require the wallet owner's own authorized actions.
+
+Circle CLI baseline: the verified pilot used 1.2.1. It accepts `--testnet` even though login help omits the flag; this alone does not require an update. Setup remains for new users, not a request to repeat the existing E2E.
+
+## V3 development status
+
+EconomicRegistry V3 separates independent Circle revenue from optional spend attribution. It is not deployed, installed, or exercised against live financial state. The existing 22 USDC receipt has not been imported into V3; any historical representation needs original Circle evidence, `historical=true`, and explicit operator approval. It cannot count as new revenue. V2 records and unresolved submissions remain historical and are never automatically resubmitted. See [V3 deployment and migration plan](REGISTRY_V3.md).
+
+Host compatibility: Codex interactive chat installation and recovery remain VERIFIED/PASS. See the [host compatibility note](INSTALL.md#supported-hosts) for the separately untested ChatGPT Desktop local host.

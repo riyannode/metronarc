@@ -70,9 +70,25 @@ The CLI returns stable codes in `{"ok":false,"error":{"code":...,"message":...}}
 | `METRON_CIRCLE_NOT_AUTHENTICATED` | Circle Agent Wallet needs user login/OTP. |
 | `METRON_CIRCLE_COMMAND_FAILED` | Circle CLI returned failure; inspect the CLI directly without exposing its credentials. |
 | `METRON_CIRCLE_SCHEMA_CHANGED` | Circle or Arc RPC output did not match the strict transaction/receipt shape METRON accepts. Stop reconciliation and inspect the provider response; do not infer asset, amount, or settlement fields. |
-| `METRON_REGISTRY_ATTRIBUTION_INVALID` | Revenue attribution does not point to an existing, same-goal Spend Intent. |
+| `METRON_REGISTRY_ATTRIBUTION_INVALID` | Legacy V2 attribution error; V3 revenue requires no spend. Existing deal input still validates an optional same-goal reference. |
+| `METRON_REGISTRY_ACTIVATION_REQUIRED` | New source is deferred, or activation is missing/unverified. Inspect the durable backlog; approve ABI/runtime-verified activation and selected resume. No payment is repeated. |
+| `METRON_REGISTRY_RELEASE_INVALID` | Bundled ABI/runtime/source release hashes are invalid or differ from the Foundry build; do not activate. |
+| `METRON_REGISTRY_ATTRIBUTION_EVIDENCE_INVALID` | Captured x402 output, customer-work bytes, deal/invoice/customer binding or evidence manifest is missing or inconsistent. A bare hash is not accepted; do not fabricate historical output. |
+| `METRON_REGISTRY_V3_NOT_CONFIGURED` | V3 dispatch is disabled until an approved deployment address is configured; payment/accounting truth is unaffected. |
+| `METRON_REGISTRY_CONTRACT_MISMATCH` | Configured deployment/version/chain conflicts with the sealed provenance context. V2 is never a V3 target. |
+| `METRON_REGISTRY_INVALID_UPDATE` | Internal provenance update attempted a sealed field; preserve the record and correct the caller. |
+| `METRON_REGISTRY_CONFLICT` | A deterministic identity has different sealed content or context. Preserve the original; inspect preimages and namespace. |
+| `METRON_REGISTRY_DUPLICATE_SETTLEMENT` | Provider evidence or a direct-transfer transaction alias is already reserved. Do not create another financial receipt or registry fact. |
+| `METRON_REGISTRY_RELATIONSHIP_INVALID` | Endpoints, types, namespace or operator claim evidence are invalid. Link only existing compatible facts. |
+| `METRON_REGISTRY_HISTORY_APPROVAL_REQUIRED` | Exact historical import or attribution requires explicit operator approval before supplying operator_confirmed:true. |
+| `METRON_REGISTRY_RECEIPT_INVALID` | Receipt preimages, source/endpoint bindings, identity or saved readback do not match; do not report verified provenance. |
+| `METRON_REGISTRY_CANONICAL_INVALID` | The restricted canonical schema rejects unsupported values; use ASCII and exact decimal strings. |
+| `METRON_REGISTRY_CALL_NOT_ALLOWED` | The requested Circle registry signature/arguments are outside the allowlist; do not use a generic contract call. |
+| `METRON_REGISTRY_FACT_PENDING` | Relationship endpoints are not yet confirmed; synchronize their existing records first. |
+| `METRON_REGISTRY_ALREADY_CLAIMED` | Another sync claimed the record. Use readback only and preserve the durable state. |
+| `METRON_REGISTRY_SEALED` | SQLite rejected mutation or deletion of immutable V3 provenance. Preserve the original record. |
 | `METRON_REGISTRY_EVIDENCE_INVALID` | Reconciled Circle evidence or its exact amount/address fields do not satisfy registry commitment requirements. |
-| `METRON_REGISTRY_ORIGIN_SPEND_PENDING` | The attributed spend is not yet confirmed on-chain; sync its outbox record before recording revenue. A `PENDING` spend record may make its first submission during sync; a `SUBMITTED` or `UNKNOWN` record permits readback only. |
+| `METRON_REGISTRY_ORIGIN_SPEND_PENDING` | Historical V2 error only. V3 independent revenue never waits for a spend. |
 | `METRON_REGISTRY_PERSISTENCE_FAILED` | The local registry outbox could not persist the provenance record; business truth remains unchanged. |
 | `METRON_REGISTRY_RECORD_NOT_FOUND` | The requested registry outbox record does not exist; inspect local registry status and use its source entity ID. |
 | `METRON_REGISTRY_REVENUE_NOT_RECONCILED` | The incoming payment, invoice, journal, or deal is not fully reconciled for revenue recording. |
@@ -118,5 +134,5 @@ The CLI returns stable codes in `{"ok":false,"error":{"code":...,"message":...}}
 ## Registry operation boundaries
 
 - `registry-sync` reconciles outbox records. Only `PENDING` can make its first submission, guarded by a conditional SQLite claim and a pre-submit contract read. `SUBMITTED` and `UNKNOWN` are readback-only; `CONFIRMED` and `FAILED` are terminal for sync.
-- `registry-recover-spend --id SI-...` is a separate explicit recovery operation for an already executed spend with confirmed Circle payment, exact provider amount, and a posted balanced journal. It checks local identities and contract state before any first submission. It does not repeat payment reconciliation.
+- V3 `registry-recover-spend` and `registry-recover-revenue` require explicit approval of historical facts and `operator_confirmed:true`. They use persisted settlement/journals and write historical provenance only. V2 recovery submissions are retired; V2 sync is readback-only.
 - A process crash after the `PENDING` claim leaves `SUBMITTED`; timeout or ambiguous submission becomes `UNKNOWN`. Neither state permits another submission. If readback cannot resolve it, stop for operator investigation instead of retrying the write.

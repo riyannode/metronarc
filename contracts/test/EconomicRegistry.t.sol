@@ -1,177 +1,153 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
-
 import {Test} from "forge-std/Test.sol";
 import {EconomicRegistry} from "../src/EconomicRegistry.sol";
 
 contract EconomicRegistryTest is Test {
     EconomicRegistry registry;
     address wallet = address(0xA11CE);
-    address otherWallet = address(0xB0B);
-    bytes32 spendId = keccak256("spend-1");
-    bytes32 goalHash = keccak256("goal-1");
-    bytes32 intentHash = keccak256("intent-1");
-    bytes32 paymentHash = keccak256("payment-1");
+    bytes32 schema = keccak256("schema/1");
+    bytes32 spendType = keccak256("X402_SPEND");
+    bytes32 revenueType = keccak256("CIRCLE_REVENUE");
+    bytes32 relationType = keccak256("SUPPORTS");
 
     function setUp() public {
         registry = new EconomicRegistry();
     }
 
-    function recordSpend(address caller, bytes32 id) internal {
-        vm.prank(caller);
-        registry.recordSpend(id, goalHash, intentHash, paymentHash, 2_000_000);
+    function factId(address caller, bytes32 kind, bytes32 evidence) internal view returns (bytes32) {
+        return sha256(abi.encode(sha256("METRON_FACT_ID_V3"), block.chainid, address(registry), caller, kind, evidence));
     }
 
-    function recordRevenue(address caller, bytes32 id, bytes32 evidence) internal {
-        vm.prank(caller);
-        registry.recordRevenue(id, evidence, 5_000_000, 500_000);
-    }
-
-    function testVersionIsTwo() public view {
-        assertEq(registry.VERSION(), "2");
-    }
-
-    function testRecordsImmutableSpendAndRejectsDuplicate() public {
-        recordSpend(wallet, spendId);
-        (
-            address operatingWallet,
-            bytes32 storedGoal,
-            bytes32 storedIntent,
-            bytes32 storedPayment,
-            uint256 amount,
-            uint256 recordedAt,
-            uint256 revenueCount
-        ) = registry.spendRecords(wallet, spendId);
-        assertEq(operatingWallet, wallet);
-        assertEq(storedGoal, goalHash);
-        assertEq(storedIntent, intentHash);
-        assertEq(storedPayment, paymentHash);
-        assertEq(amount, 2_000_000);
-        assertGt(recordedAt, 0);
-        assertEq(revenueCount, 0);
-
+    function fact(bytes32 kind, bytes32 evidence) internal returns (bytes32 id) {
+        id = factId(wallet, kind, evidence);
         vm.prank(wallet);
-        vm.expectRevert(abi.encodeWithSelector(EconomicRegistry.SpendAlreadyRecorded.selector, wallet, spendId));
-        registry.recordSpend(spendId, goalHash, intentHash, keccak256("changed"), 3_000_000);
+        registry.recordFact(id, kind, schema, evidence, keccak256(abi.encode(kind, evidence)));
     }
 
-    function testRejectsInvalidSpend() public {
+    function relation(bytes32 from, bytes32 to) internal returns (bytes32 id) {
+        id = sha256(
+            abi.encode(
+                sha256("METRON_RELATION_ID_V3"), block.chainid, address(registry), wallet, relationType, from, to
+            )
+        );
+        vm.prank(wallet);
+        registry.recordRelationship(id, relationType, schema, from, to, keccak256(abi.encode(from, to)));
+    }
+
+    function testStandaloneRevenueAndSpend() public {
+        bytes32 revenue = fact(revenueType, keccak256("receipt"));
+        bytes32 spend = fact(spendType, keccak256("expense"));
+        (bytes32 stored,,,,) = registry.facts(wallet, revenue);
+        assertEq(stored, revenueType);
+        assertEq(registry.evidenceFacts(wallet, keccak256("expense")), spend);
+        assertEq(registry.VERSION(), 3);
+    }
+
+    function testManyToManyWithoutChangingFacts() public {
+        bytes32 a = fact(spendType, keccak256("a"));
+        bytes32 b = fact(spendType, keccak256("b"));
+        bytes32 c = fact(revenueType, keccak256("c"));
+        bytes32 d = fact(revenueType, keccak256("d"));
+        relation(a, c);
+        relation(b, c);
+        relation(a, d);
+        relation(b, d);
+        assertEq(registry.evidenceFacts(wallet, keccak256("c")), c);
+        assertEq(registry.evidenceFacts(wallet, keccak256("d")), d);
+    }
+
+    function testReplayAndConflictingRecordsRevert() public {
+        bytes32 id = fact(revenueType, keccak256("receipt"));
+        vm.prank(wallet);
+        vm.expectRevert(EconomicRegistry.AlreadyRecorded.selector);
+        registry.recordFact(id, revenueType, schema, keccak256("receipt"), keccak256("changed"));
+    }
+
+    function testDuplicateSettlementAcrossTypesReverts() public {
+        fact(revenueType, keccak256("receipt"));
+        bytes32 id = factId(wallet, spendType, keccak256("receipt"));
+        vm.prank(wallet);
+        vm.expectRevert(EconomicRegistry.EvidenceAlreadyUsed.selector);
+        registry.recordFact(id, spendType, schema, keccak256("receipt"), keccak256("other"));
+    }
+
+    function testWrongWalletIdentityReverts() public {
+        bytes32 id = factId(wallet, revenueType, keccak256("receipt"));
+        vm.prank(address(0xB0B));
+        vm.expectRevert(EconomicRegistry.InvalidIdentity.selector);
+        registry.recordFact(id, revenueType, schema, keccak256("receipt"), keccak256("content"));
+    }
+
+    function testWrongChainAndDeploymentReplaysRevert() public {
+        bytes32 id = factId(wallet, revenueType, keccak256("receipt"));
+        uint256 originalChain = vm.getChainId();
+        vm.chainId(originalChain + 1);
+        vm.prank(wallet);
+        vm.expectRevert(EconomicRegistry.InvalidIdentity.selector);
+        registry.recordFact(id, revenueType, schema, keccak256("receipt"), keccak256("content"));
+        vm.chainId(originalChain);
+        EconomicRegistry other = new EconomicRegistry();
+        vm.prank(wallet);
+        vm.expectRevert(EconomicRegistry.InvalidIdentity.selector);
+        other.recordFact(id, revenueType, schema, keccak256("receipt"), keccak256("content"));
+    }
+
+    function testMissingAndWrongNamespaceEndpointsRevert() public {
+        bytes32 a = fact(spendType, keccak256("a"));
+        bytes32 b = fact(revenueType, keccak256("b"));
+        vm.prank(address(0xB0B));
+        vm.expectRevert(EconomicRegistry.FactNotFound.selector);
+        registry.recordRelationship(keccak256("id"), relationType, schema, a, b, keccak256("claim"));
+        vm.prank(wallet);
+        vm.expectRevert(EconomicRegistry.FactNotFound.selector);
+        registry.recordRelationship(keccak256("id"), relationType, schema, a, keccak256("missing"), keccak256("claim"));
+    }
+
+    function testDuplicateRelationshipReverts() public {
+        bytes32 a = fact(spendType, keccak256("a"));
+        bytes32 b = fact(revenueType, keccak256("b"));
+        bytes32 id = relation(a, b);
+        vm.prank(wallet);
+        vm.expectRevert(EconomicRegistry.AlreadyRecorded.selector);
+        registry.recordRelationship(id, relationType, schema, a, b, keccak256("different"));
+    }
+
+    function testZeroAndSelfCommitmentsRevert() public {
+        bytes32 a = fact(spendType, keccak256("a"));
+        vm.prank(wallet);
+        vm.expectRevert(EconomicRegistry.InvalidCommitment.selector);
+        registry.recordRelationship(keccak256("id"), relationType, schema, a, a, keccak256("claim"));
+        vm.prank(wallet);
+        vm.expectRevert(EconomicRegistry.InvalidCommitment.selector);
+        registry.recordFact(keccak256("id"), revenueType, schema, keccak256("receipt"), bytes32(0));
+    }
+
+    function testNoNativeCustodyEntry() public {
+        vm.deal(wallet, 1 ether);
+        vm.prank(wallet);
+        (bool ok,) = address(registry).call{value: 1}("");
+        assertFalse(ok);
+        assertEq(address(registry).balance, 0);
+    }
+
+    function testFutureSchemaWithoutNewABI() public {
+        bytes32 kind = keccak256("FUTURE_ECONOMIC_EVENT");
+        bytes32 ev = keccak256("future-source");
+        bytes32 id = factId(wallet, kind, ev);
+        vm.prank(wallet);
+        registry.recordFact(id, kind, keccak256("future-schema/12"), ev, keccak256("future-content"));
+        (bytes32 stored,,,,) = registry.facts(wallet, id);
+        assertEq(stored, kind);
+    }
+
+    function testFuzzNamespacedReplay(bytes32 kind, bytes32 evidence, bytes32 content) public {
+        vm.assume(kind != bytes32(0) && evidence != bytes32(0) && content != bytes32(0));
+        bytes32 id = factId(wallet, kind, evidence);
         vm.startPrank(wallet);
-        vm.expectRevert(EconomicRegistry.InvalidSpendRecord.selector);
-        registry.recordSpend(bytes32(0), goalHash, intentHash, paymentHash, 1);
-        vm.expectRevert(EconomicRegistry.InvalidSpendRecord.selector);
-        registry.recordSpend(spendId, bytes32(0), intentHash, paymentHash, 1);
-        vm.expectRevert(EconomicRegistry.InvalidSpendRecord.selector);
-        registry.recordSpend(spendId, goalHash, bytes32(0), paymentHash, 1);
-        vm.expectRevert(EconomicRegistry.InvalidSpendRecord.selector);
-        registry.recordSpend(spendId, goalHash, intentHash, bytes32(0), 1);
-        vm.expectRevert(EconomicRegistry.InvalidSpendRecord.selector);
-        registry.recordSpend(spendId, goalHash, intentHash, paymentHash, 0);
+        registry.recordFact(id, kind, schema, evidence, content);
+        vm.expectRevert(EconomicRegistry.AlreadyRecorded.selector);
+        registry.recordFact(id, kind, schema, evidence, content);
         vm.stopPrank();
-    }
-
-    function testDifferentWalletsHaveIndependentSpendNamespaces() public {
-        recordSpend(wallet, spendId);
-        recordSpend(otherWallet, spendId);
-        (address first,,,,,,) = registry.spendRecords(wallet, spendId);
-        (address second,,,,,,) = registry.spendRecords(otherWallet, spendId);
-        assertEq(first, wallet);
-        assertEq(second, otherWallet);
-    }
-
-    function testThreeDistinctRevenuesCanLinkToOneSpend() public {
-        recordSpend(wallet, spendId);
-        bytes32 first = keccak256("revenue-1");
-        bytes32 second = keccak256("revenue-2");
-        bytes32 third = keccak256("revenue-3");
-
-        recordRevenue(wallet, spendId, first);
-        recordRevenue(wallet, spendId, second);
-        recordRevenue(wallet, spendId, third);
-
-        (,,,,,, uint256 revenueCount) = registry.spendRecords(wallet, spendId);
-        assertEq(revenueCount, 3);
-        assertRevenue(wallet, spendId, first);
-        assertRevenue(wallet, spendId, second);
-        assertRevenue(wallet, spendId, third);
-    }
-
-    function assertRevenue(address caller, bytes32 id, bytes32 evidence) internal view {
-        (bytes32 storedSpendId, bytes32 storedEvidence, uint256 amount, uint256 earned, uint256 recordedAt) =
-            registry.revenueRecords(caller, id, evidence);
-        assertEq(storedSpendId, id);
-        assertEq(storedEvidence, evidence);
-        assertEq(amount, 5_000_000);
-        assertEq(earned, 500_000);
-        assertGt(recordedAt, 0);
-        assertTrue(registry.usedRevenueEvidence(caller, evidence));
-    }
-
-    function testDuplicateRevenueEvidenceForSameSpendIsRejected() public {
-        recordSpend(wallet, spendId);
-        bytes32 evidence = keccak256("revenue-1");
-        recordRevenue(wallet, spendId, evidence);
-
-        vm.prank(wallet);
-        vm.expectRevert(abi.encodeWithSelector(EconomicRegistry.RevenueAlreadyRecorded.selector, wallet, evidence));
-        registry.recordRevenue(spendId, evidence, 5_000_000, 500_000);
-    }
-
-    function testRevenueEvidenceCannotBeReusedForAnotherSpend() public {
-        bytes32 otherSpendId = keccak256("spend-2");
-        bytes32 evidence = keccak256("revenue-1");
-        recordSpend(wallet, spendId);
-        recordSpend(wallet, otherSpendId);
-        recordRevenue(wallet, spendId, evidence);
-
-        vm.prank(wallet);
-        vm.expectRevert(abi.encodeWithSelector(EconomicRegistry.RevenueAlreadyRecorded.selector, wallet, evidence));
-        registry.recordRevenue(otherSpendId, evidence, 5_000_000, 500_000);
-    }
-
-    function testRejectsRevenueForUnknownSpend() public {
-        vm.prank(wallet);
-        vm.expectRevert(abi.encodeWithSelector(EconomicRegistry.SpendNotFound.selector, wallet, spendId));
-        registry.recordRevenue(spendId, keccak256("revenue-1"), 1, 0);
-    }
-
-    function testRejectsInvalidRevenue() public {
-        recordSpend(wallet, spendId);
-        vm.startPrank(wallet);
-        vm.expectRevert(EconomicRegistry.InvalidRevenueRecord.selector);
-        registry.recordRevenue(spendId, bytes32(0), 1, 0);
-        vm.expectRevert(EconomicRegistry.InvalidRevenueRecord.selector);
-        registry.recordRevenue(spendId, keccak256("revenue-1"), 0, 0);
-        vm.expectRevert(EconomicRegistry.InvalidRevenueRecord.selector);
-        registry.recordRevenue(spendId, keccak256("revenue-2"), 1, 2);
-        vm.stopPrank();
-    }
-
-    function testDifferentWalletsMayUseSameRevenueEvidenceIndependently() public {
-        bytes32 evidence = keccak256("revenue-1");
-        recordSpend(wallet, spendId);
-        recordSpend(otherWallet, spendId);
-        recordRevenue(wallet, spendId, evidence);
-        recordRevenue(otherWallet, spendId, evidence);
-        assertRevenue(wallet, spendId, evidence);
-        assertRevenue(otherWallet, spendId, evidence);
-    }
-
-    function testWalletCannotAttachRevenueToAnotherWalletsSpend() public {
-        recordSpend(wallet, spendId);
-        vm.prank(otherWallet);
-        vm.expectRevert(abi.encodeWithSelector(EconomicRegistry.SpendNotFound.selector, otherWallet, spendId));
-        registry.recordRevenue(spendId, keccak256("revenue-1"), 1, 0);
-    }
-
-    function testRegistryHasNoPayableOrTokenTransferEntryPoint() public {
-        vm.deal(address(this), 1);
-        (bool accepted,) = address(registry).call{value: 1}("");
-        assertFalse(accepted);
-        (accepted,) = address(registry).call(abi.encodeWithSignature("transfer(address,uint256)", wallet, 1));
-        assertFalse(accepted);
-        (accepted,) = address(registry)
-            .call(abi.encodeWithSignature("transferFrom(address,address,uint256)", wallet, otherWallet, 1));
-        assertFalse(accepted);
     }
 }

@@ -1,0 +1,320 @@
+[
+  {
+    "type": "function",
+    "name": "VERSION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "evidenceFacts",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "facts",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "factType",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "schemaHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "evidenceId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "contentHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "recordedAt",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "recordFact",
+    "inputs": [
+      {
+        "name": "factId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "factType",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "schemaHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "evidenceId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "contentHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "recordRelationship",
+    "inputs": [
+      {
+        "name": "relationId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "relationType",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "schemaHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "fromFact",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "toFact",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "contentHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "relationships",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "relationType",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "schemaHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "fromFact",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "toFact",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "contentHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "recordedAt",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "event",
+    "name": "FactRecorded",
+    "inputs": [
+      {
+        "name": "wallet",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "factId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "factType",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "schemaHash",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "evidenceId",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "contentHash",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RelationshipRecorded",
+    "inputs": [
+      {
+        "name": "wallet",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "relationId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "relationType",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "schemaHash",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "fromFact",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "toFact",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "contentHash",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "AlreadyRecorded",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "EvidenceAlreadyUsed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "FactNotFound",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidCommitment",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidIdentity",
+    "inputs": []
+  }
+]
