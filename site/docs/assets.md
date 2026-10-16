@@ -2,7 +2,7 @@
 
 ## Landing page photos
 
-`public/images/metron-cloud-workspace.webp` is the user's supplied `Floating Workspace Above the Clouds.png`, converted at its original 1672 × 941 resolution to WebP (quality 0.86). It is decorative and loads with high priority. CSS applies 0 px blur, full opacity, 0.9 saturation, and 0.85 brightness by default. A local gradient behind the copy supports text contrast, with a separate 96 px fade at the bottom edge. Existing object positioning and 1.04 scaling are preserved.
+`public/images/iridescent-bubble-clouds.png` is the user's supplied `Iridescent Bubble Above the Clouds.png`, at its original 1672 × 941 resolution. It is decorative and loads with high priority. CSS image filters, positioning, scaling, local text treatment, and the 96 px bottom fade remain unchanged.
 
 `public/images/metron-editorial.webp` was created with the built-in imagegen tool from the user's supplied portrait of a seated man surrounded by vintage monitors and research notes. The scene was extended horizontally to 1672 × 941 and given a cool blue-and-white treatment. It occupies the former Anatomy section at a full-width 16:9 ratio, with descriptive alt text and lazy loading. CSS applies 0.5 px blur, full opacity, 0.9 saturation, and 0.85 brightness by default. Only the outer 8% at the top and bottom fades to the neighboring white backgrounds. The asset's existing color grade and edge treatment remain part of the image.
 

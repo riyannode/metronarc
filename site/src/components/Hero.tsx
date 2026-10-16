@@ -10,7 +10,7 @@ export default function Hero() {
   return (
     <section id="overview" className="relative min-h-[1100px] overflow-hidden bg-white px-6 pt-[10px] md:px-12">
       <div aria-hidden="true" className="hero-backdrop pointer-events-none absolute inset-x-0 top-0 z-0 overflow-hidden">
-        <img src="/images/metron-cloud-workspace.webp" alt="" width={1672} height={941} fetchPriority="high" className="h-full w-full object-cover" />
+        <img src="/images/iridescent-bubble-clouds.png" alt="" width={1672} height={941} fetchPriority="high" className="h-full w-full object-cover" />
       </div>
       <div aria-hidden="true" className="h-[60px]" />
       <div className="hero-copy relative z-10 mx-auto mb-[60px] mt-[120px] max-w-[820px] text-center">
