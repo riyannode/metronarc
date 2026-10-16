@@ -2,24 +2,28 @@
 
 METRON's business workflow starts in an interactive chat. The agent calls METRON's local finance CLI for you; users do not need to type Python commands for business operations.
 
+**Existing operators:** Codex installation and fresh-session recovery already PASS. METRON v0.2.0 is installed and enabled at post-merge source `dccb9c4497534118841f3819366362725b15b7be`; source and installed cache matched 47/47 tracked files, including `DELIVERABLE`, and a new Codex session loaded all four skills. Continue with the existing plugin, Circle session, wallet, and SQLite ledger. Do not reinstall, log in again, create wallets, reset SQLite, or repeat transactions merely to prove these results. See [recorded acceptance](SUBMISSION.md#current-acceptance-matrix).
+
+The installation and Circle setup steps below are for new users or an explicitly authorized missing prerequisite.
+
 ## Supported hosts
 
-- **ChatGPT desktop — NOT VERIFIED:** the documented marketplace installation and local-thread workflow still require a clean desktop acceptance test. The plugin requires local execution to reach METRON's local files and Circle CLI. A browser or remote thread cannot access another machine's files or CLI.
-- **Codex interactive chat:** the local workflow and fresh-session recovery were verified in Codex. Final deal and escalated-spend approvals in this pilot require a direct instruction in that chat.
+- **Codex interactive chat — VERIFIED / PASS:** plugin installation, the Arc Testnet business workflow, and fresh-session recovery passed. Final deal and escalated-spend approvals in this pilot require a direct instruction in that chat.
+- **Host compatibility:** ChatGPT Desktop local execution is **NOT VERIFIED** by a separate acceptance test. This does not downgrade the Codex PASS results. The plugin requires local execution; a browser or remote thread cannot access another machine's files or CLI. Other hosts have no separate acceptance evidence.
 - **Local terminal:** use it for one-time Circle CLI setup or troubleshooting only. The terminal commands below do not replace the chat workflow.
 
-METRON's Python runtime and SQLite state run locally. Circle CLI must be callable by that runtime. Windows and WSL have separate PATHs and installs; METRON includes a WSL adapter for a visible Windows Circle CLI, so check whether it can use an existing CLI before installing another. Other AI hosts are not verified.
+METRON's Python runtime and SQLite state run locally. Circle CLI must be callable by that runtime. Windows and WSL have separate PATHs and installs; METRON includes a WSL adapter for a visible Windows Circle CLI, so check whether it can use an existing CLI before installing another.
 
 ## Install METRON
 
-The repository is private. Your GitHub account must already have access.
+For new users, the Codex marketplace CLI provides this installation path. The repository is private; your GitHub account must already have access.
 
-1. In ChatGPT desktop, open **Plugins** and choose **Add marketplace from a repository**.
-2. Enter [`riyannode/metronarc`](https://github.com/riyannode/metronarc) and select ref `master`.
-3. Install and enable METRON yourself, then start a local chat.
-4. Ask: **“Use METRON. Show status.”**
+```sh
+codex plugin marketplace add riyannode/metronarc --ref master
+codex plugin add metron@metron-local
+```
 
-The plugin requires the ChatGPT desktop local executor. Do not use a cloud or remote thread for local Circle or SQLite operations. Codex interactive chat is the verified recovery path for the current pilot.
+Confirm METRON is enabled in Codex, start a new local chat, and ask **“Use METRON. Show status.”** The four skills are `metron-policy`, `metron-email`, `metron-invoice`, and `metron-payment`. Local execution must reach Circle CLI and the SQLite files on that machine. The existing operator has already completed installation and fresh-session verification; these commands are not a recovery requirement.
 
 ## Requirements
 
@@ -48,12 +52,13 @@ npm install -g @circle-fin/cli@latest
 
 Do not reinstall an existing CLI without a reason. Check `circle --version` and `circle wallet login --help`. Circle's setup guide requires CLI 1.2.1 or newer. CLI 1.2.1 accepts `--testnet` even though login help omits it; absence from help is not a reason to update. Use the [official setup guide](https://agents.circle.com/skills/setup.md) and [Circle CLI command reference](https://developers.circle.com/agent-stack/circle-cli/command-reference) to check current requirements. Ask before any update.
 
-## Set up Circle Agent Wallet with your AI agent
+## EconomicRegistry V3 transition
 
 EconomicRegistry V3 records independent typed settlement facts and immutable optional relationships, including many-to-many attribution. Revenue never requires a spend. Circle remains payment authority and SQLite/journals remain financial truth; registry records never increase revenue or earned capital. V3 is not deployed or enabled by default. The V2 contract at `0x547552585d8d995c5063820b2950e0db52b4cab4` on Arc Testnet (chain ID `5042002`) is historical provenance, with readback only in the V3 adapter. See [V3 design and transition](REGISTRY_V3.md). Configure and fund only the Circle operating wallet for payment operations. Service terms remain operator-owned through `service-set`. Existing operators do not reinstall, log in again, create wallets or reset SQLite for V3 development. New reconciled sources are captured durably while V3 is disabled; inspect deferred provenance in status/dashboard. Activation requires an approved deployed address and ABI/runtime verification through `registry-activate`, followed by explicit selected-source resume. `config-set` cannot bypass activation. See [activation procedure](REGISTRY_V3_HARDENING.md).
 
+## Set up Circle Agent Wallet with your AI agent
 
-After you install and enable the plugin, paste this prompt into a ChatGPT desktop local thread or a local Codex chat:
+For a new user who still needs Circle setup, paste this prompt into a local Codex chat after enabling the plugin. Existing operators keep their current authenticated session and wallet:
 
 > Run `curl -sL https://agents.circle.com/skills/setup.md`, read the official setup instructions, then help me install and connect Circle Agent Wallet to METRON on Arc Testnet. Check my existing installation and wallets first. Guide me through any required authentication and ask for my approval before making changes.
 >
@@ -69,7 +74,7 @@ For readiness, check the testnet session, existing wallet identity, METRON's con
 
 ## Manual Circle setup
 
-You install and enable the plugin in ChatGPT. Use a local terminal only for Circle setup or troubleshooting. Windows and WSL have separate PATHs and CLI installs. METRON can bridge from WSL to a visible Windows Circle CLI through its Windows Node runtime; check that path before suggesting another install.
+For new users, enable the plugin in the local host first. Use a local terminal only for Circle setup or explicitly requested troubleshooting. Windows and WSL have separate PATHs and CLI installs. METRON can bridge from WSL to a visible Windows Circle CLI through its Windows Node runtime; check that path before suggesting another install.
 
 Check the current Terms state and fetch the live Terms details:
 
@@ -121,4 +126,4 @@ METRON stores `metron.sqlite`, `config.json`, and a generated `dashboard.html` u
 - `node`, `npm`, or `circle` is missing from PATH: reopen the terminal and check whether the local runtime or WSL adapter can access it before installing another copy.
 - No interactive OTP prompt: stop and have the user complete login in the local terminal.
 
-Never initialize over a user's existing `~/.metron/metron.sqlite`. For a fresh-session recovery check, open a new Codex chat with the plugin enabled and use read-only status operations.
+Never initialize over a user's existing `~/.metron/metron.sqlite`. Fresh-session recovery already passed in a genuinely new Codex chat after the PR #20 refresh. It does not require another installation, login, wallet, ledger, or transaction.
