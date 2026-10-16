@@ -12,7 +12,7 @@ const installSteps = [
 export default function Install() {
   return (
     <section id="install" aria-labelledby="install-title" className="relative bg-white px-6 py-20 md:py-28">
-      <div className="mx-auto max-w-[1100px]">
+      <div className="mx-auto max-w-[1500px]">
         <div className="mx-auto mb-16 max-w-3xl text-center">
           <Reveal><span className="section-eyebrow mb-8"><Github size={13} /> INSTALL THE METRON PLUGIN</span></Reveal>
           <Reveal delay={0.1}><h2 id="install-title" className="reference-heading text-[40px] font-medium leading-[1.1] tracking-tight md:text-[56px]">One Plugin. Run Your Business</h2></Reveal>

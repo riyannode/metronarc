@@ -54,4 +54,4 @@ The built-in imagegen tool removed the ivory textured background and all interio
 
 ## USDC mark
 
-`public/brand/usdc.webp` is the user's supplied `Circle_USDC_Logo.svg.webp`, copied unchanged. The 1280 × 1280 source already has transparent corners and 402,051 fully transparent pixels, with antialiased edges. No background removal or regeneration was needed. It replaces every generic dollar icon: the operating wallet header (28 px) and the settlement workflow preview (17 px). Existing icon dimensions and layout are retained.
+`public/brand/usdc.webp` is the user's supplied `Circle_USDC_Logo.svg.webp`, copied unchanged. The 1280 × 1280 source already has transparent corners and 402,051 fully transparent pixels, with antialiased edges. No background removal or regeneration was needed. It appears in the operating wallet header (28 px), settlement workflow preview (17 px), and integrations marquee (40 px) with a visible USDC label.

@@ -43,7 +43,6 @@ a, button { touch-action: manipulation; }
 .section-eyebrow { display: inline-flex; align-items: center; gap: 8px; border: 1px solid rgb(39 117 202 / 15%); border-radius: 999px; background: rgb(255 255 255 / 65%); padding: 6px 16px; font-size: 10px; font-weight: 700; letter-spacing: 0.17em; color: #5C5C5D; backdrop-filter: blur(12px); }
 .marquee-mask { mask-image: linear-gradient(to right,transparent,black 20%,black 80%,transparent); -webkit-mask-image: linear-gradient(to right,transparent,black 20%,black 80%,transparent); }
 .marquee-track { animation: marquee 40s linear infinite; }
-.integration-chip { transition: background-color 300ms ease; }
 .integration-icon { transition: transform 300ms cubic-bezier(0.23,1,0.32,1); }
 .skip-link { position: fixed; top: 10px; left: 10px; z-index: 200; transform: translateY(-150%); border-radius: 8px; background: #fff; padding: 12px 20px; color: #1D5FA8; }
 .skip-link:focus { transform: none; }
@@ -151,7 +150,6 @@ a, button { touch-action: manipulation; }
   .primary-cta:hover { transform: scale(1.02); background: #1D5FA8; box-shadow: 0 10px 30px -10px rgba(39,117,202,0.5); }
   .secondary-cta:hover { transform: scale(1.02); background: rgba(39,117,202,0.04); }
   .step-row:hover { background: #FAFAFB; }
-  .integration-chip:hover { background: #EAF3FF; }
   .integration-chip:hover .integration-icon { transform: scale(1.1); }
 }
 
