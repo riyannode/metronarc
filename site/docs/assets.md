@@ -2,9 +2,29 @@
 
 ## Landing page photos
 
-`public/images/metron-cloud-workspace.webp` is the user's supplied `Floating Workspace Above the Clouds.png`, converted at its original 1672 × 941 resolution to WebP (quality 0.86). The source composition and colors are preserved. CSS applies 1 px blur, reduced saturation, and blue-and-white overlays behind the hero text. It is decorative and loads with high priority.
+`public/images/metron-cloud-workspace.webp` is the user's supplied `Floating Workspace Above the Clouds.png`, converted at its original 1672 × 941 resolution to WebP (quality 0.86). It is decorative and loads with high priority. CSS leaves blur, opacity, and saturation neutral by default. A local gradient behind the copy supports text contrast, with a separate 96 px fade at the bottom edge. Existing object positioning and 1.04 scaling are preserved.
 
-`public/images/metron-editorial.webp` was created with the built-in imagegen tool from the user's supplied portrait of a seated man surrounded by vintage monitors and research notes. The scene was extended horizontally to 1672 × 941 and given a cool blue-and-white treatment. It occupies the former Anatomy section at a full-width 16:9 ratio, with descriptive alt text and lazy loading. CSS adds 2 px blur, reduced saturation, 60% opacity, and pale blue edge fades.
+`public/images/metron-editorial.webp` was created with the built-in imagegen tool from the user's supplied portrait of a seated man surrounded by vintage monitors and research notes. The scene was extended horizontally to 1672 × 941 and given a cool blue-and-white treatment. It occupies the former Anatomy section at a full-width 16:9 ratio, with descriptive alt text and lazy loading. CSS leaves blur, opacity, and saturation neutral by default. Only the outer 8% at the top and bottom fades to the neighboring white backgrounds. The asset's existing color grade and edge treatment remain part of the image.
+
+### Image controls
+
+Edit these defaults in `src/styles.css`; no component or dependency change is required:
+
+```css
+.hero-backdrop {
+  --hero-blur: 0px;
+  --hero-opacity: 1;
+  --hero-saturation: 1;
+}
+
+.editorial-image {
+  --editorial-blur: 0px;
+  --editorial-opacity: 1;
+  --editorial-saturation: 1;
+}
+```
+
+The controls are independent. Opacity runs from `0` to `1`; saturation `1` preserves the source color and `0` removes it. Blur uses a CSS length such as `3px`. Neither image asset was replaced during this CSS treatment update. Large or high-DPI displays can still reveal the resolution limit of the existing 1672 × 941 assets.
 
 The previous locally generated gradient video and poster remain in `public/` but are no longer rendered. The photos are served locally; no remote image requests or runtime image-generation calls are used.
 

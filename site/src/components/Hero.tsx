@@ -32,7 +32,7 @@ export default function Hero() {
           </div>
         )}
       </nav>
-      <div className="relative z-10 mx-auto mb-[60px] mt-[120px] max-w-[820px] text-center">
+      <div className="hero-copy relative z-10 mx-auto mb-[60px] mt-[120px] max-w-[820px] text-center">
         <a href="#how-it-works" className="mb-8 inline-flex items-center gap-2 rounded-full border border-[#2775CA]/15 bg-white/60 px-3 py-1.5 backdrop-blur-sm transition-colors hover:border-[#2775CA]/50 sm:gap-3">
           <span className="rounded-full bg-[#2775CA] px-2 py-0.5 text-[10px] tracking-tighter text-white">NEW</span>
           <span className="text-[9px] font-medium tracking-[0.15em] text-[#161716]/60 sm:text-[11px]">AUTONOMOUS ECONOMIC OPERATIONS</span>
