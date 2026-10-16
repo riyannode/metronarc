@@ -30,7 +30,7 @@ The controls are independent. Opacity runs from `0` to `1`; saturation `1` prese
 
 The previous locally generated gradient video and poster remain in `public/` but are no longer rendered. The photos are served locally; no remote image requests or runtime image-generation calls are used.
 
-Inter and Inter Tight are loaded through Google Fonts under their SIL Open Font License. They are the typefaces named in the reference. Lucide icons use the installed `lucide-react` package under its ISC license. The favicon is a local blue-and-white typographic M.
+Inter and Inter Tight are loaded through Google Fonts under their SIL Open Font License. They are the typefaces named in the reference. Lucide icons use the installed `lucide-react` package under its ISC license. The favicon uses the supplied METRON omega logo.
 
 ## Supplied integration logos
 
@@ -48,7 +48,7 @@ Codex is intentionally omitted. The marquee uses logos only, with nonvisual acce
 
 ## METRON brand mark
 
-`public/brand/metron-mark.png` is a transparent cutout of the navy omega-style logo supplied by the user as `ChatGPT Image Sep 28, 2026, 04_28_48 AM.png`. It appears to the left of METRON in the navbar and footer. The text uses Inter Tight at weight 500, matching the hero, with no trailing period. The original navy logo color is retained.
+`public/brand/metron-mark.png` is a transparent cutout of the navy omega-style logo supplied by the user as `ChatGPT Image Sep 28, 2026, 04_28_48 AM.png`. It appears to the left of METRON in the navbar and footer. The text uses Inter Tight at weight 500, matching the hero, with no trailing period. The original navy logo color is retained. The browser favicon uses this same PNG; the plugin composer icon and logo use an identical copy at `../assets/metron-mark.png`.
 
 The built-in imagegen tool removed the ivory textured background and all interior negative spaces. Prompt: extract only the original navy omega-style mark; preserve its curves, tapered inner strokes, feet, color, symmetry, and proportions; remove the ivory background and interior negative spaces; tightly crop with a small transparent margin; add no text, glow, shadow, or background.
 

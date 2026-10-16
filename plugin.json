@@ -15,8 +15,8 @@
         "developerName": "METRON contributors",
         "category": "Finance",
         "capabilities": ["Read", "Write"],
-        "composerIcon": "./assets/metron-mark.svg",
-        "logo": "./assets/metron-mark.svg",
+        "composerIcon": "./assets/metron-mark.png",
+        "logo": "./assets/metron-mark.png",
         "defaultPrompt": ["Use METRON policy, customer email, invoice documents, or payment verification operations."]
       },
       "review": {
