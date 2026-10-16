@@ -35,7 +35,8 @@ a, button { touch-action: manipulation; }
 }
 .dashboard-panel { border-bottom-color: transparent; box-shadow: 0 -25px 100px rgba(39,117,202,0.09), inset 0 1px 1px rgba(255,255,255,0.8); }
 .dashboard-panel > aside { border-bottom-color: transparent; }
-.dashboard-scroll { scrollbar-width: thin; scrollbar-color: rgb(39 117 202 / 20%) transparent; }
+.dashboard-scroll::-webkit-scrollbar, .install-chat__viewport::-webkit-scrollbar { display: none; }
+.dashboard-scroll { scrollbar-width: none; scrollbar-color: rgb(39 117 202 / 20%) transparent; }
 .button { transition: transform 160ms cubic-bezier(0.23,1,0.32,1), background-color 200ms ease, box-shadow 200ms ease; }
 .step-row { transition: border-color 250ms ease, background-color 250ms ease; }
 .active-ring { background: conic-gradient(from 0deg,#FFFEFE,#2775CA); animation: active-ring 2s linear infinite; }
@@ -161,7 +162,7 @@ a, button { touch-action: manipulation; }
 .install-chat__title { font-size: 13px; font-weight: 600; }
 .install-chat__subtitle { margin-top: 3px; color: #5c5c5d; font-size: 10px; }
 .install-chat__viewport:focus-visible { outline: 2px solid #2775ca; outline-offset: -3px; }
-.install-chat__viewport { height: 390px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #cddff5 transparent; background: linear-gradient(180deg,#f9fbff,#fff); }
+.install-chat__viewport { height: 390px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; scrollbar-color: #cddff5 transparent; background: linear-gradient(180deg,#f9fbff,#fff); }
 .install-chat__messages { display: flex; flex-direction: column; gap: 20px; min-height: 100%; padding: 24px; opacity: 1; transition: opacity 240ms ease; }
 .install-chat__messages[data-fading="true"] { opacity: 0; }
 .install-chat__message { max-width: 88%; transition: opacity 240ms ease, transform 240ms cubic-bezier(0.23,1,0.32,1); }
