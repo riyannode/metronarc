@@ -211,13 +211,13 @@ def _reconciled_recovery_evidence(db: sqlite3.Connection, invoice_id: str, deal_
         "SELECT data_json FROM events WHERE event_type='INVOICE_RECONCILED' AND entity_id=?",
         (invoice_id,),
     ).fetchall()
-    policy = db.execute("SELECT reinvestment_bps FROM policies WHERE goal_id=?", (invoice["goal_id"],)).fetchone()
-    if len(reconciliations) != 1 or policy is None:
+    if len(reconciliations) != 1:
         raise finance.DomainError("METRON_EMAIL_RECOVERY_NOT_READY")
     reconciliation = json.loads(reconciliations[0]["data_json"])
-    earned = invoice["amount_atomic"] * policy["reinvestment_bps"] // 10000
-    if reconciliation.get("payment_entry_id") != payment["id"] or reconciliation.get("journal_id") != journal[0]["id"] \
-            or reconciliation.get("reinvestment_atomic") != earned:
+    earned = reconciliation.get("reinvestment_atomic")
+    if (reconciliation.get("payment_entry_id") != payment["id"]
+            or reconciliation.get("journal_id") != journal[0]["id"]
+            or type(earned) is not int or earned < 0 or earned > invoice["amount_atomic"]):
         raise finance.DomainError("METRON_EMAIL_RECOVERY_NOT_READY")
 
     try:
@@ -234,6 +234,32 @@ def _reconciled_recovery_evidence(db: sqlite3.Connection, invoice_id: str, deal_
         raise finance.DomainError("METRON_EMAIL_RECOVERY_NOT_READY")
     revenue = next(row for row in facts if row["type_hash"] == registry.label("CIRCLE_REVENUE"))
     fact_by_type = {row["type_hash"]: row for row in facts}
+    try:
+        source = json.loads(revenue["payload_json"])["data"]["source"]
+        settlement_data = json.loads(fact_by_type[registry.label("INVOICE_SETTLEMENT")]["payload_json"])["data"]
+        earned_data = json.loads(fact_by_type[registry.label("EARNED_CAPITAL")]["payload_json"])["data"]
+    except (KeyError, TypeError, ValueError):
+        raise finance.DomainError("METRON_EMAIL_RECOVERY_NOT_READY") from None
+    settlement = fact_by_type[registry.label("INVOICE_SETTLEMENT")]
+    earned_fact = fact_by_type[registry.label("EARNED_CAPITAL")]
+    if (source.get("provider") != "CIRCLE" or source.get("provider_ref") != evidence[0]["provider_ref"]
+            or not isinstance(source.get("tx_hash"), str)
+            or source["tx_hash"].lower() != evidence[0]["tx_hash"].lower()
+            or not isinstance(source.get("from_address"), str)
+            or source["from_address"].lower() != evidence[0]["from_address"].lower()
+            or not isinstance(source.get("to_address"), str)
+            or source["to_address"].lower() != evidence[0]["to_address"].lower()
+            or source.get("amount_atomic") != str(invoice["amount_atomic"])
+            or settlement_data.get("settlement_fact") != revenue["record_hash"]
+            or settlement_data.get("settlement_content_hash") != revenue["content_hash"]
+            or settlement_data.get("amount_atomic") != str(invoice["amount_atomic"])
+            or earned_data.get("settlement_fact") != revenue["record_hash"]
+            or earned_data.get("settlement_content_hash") != revenue["content_hash"]
+            or earned_data.get("amount_atomic") != str(earned)
+            or earned_data.get("asset") != settlement_data.get("asset")
+            or earned_data.get("chain_id") != settlement_data.get("chain_id")
+            or settlement["source_entity_id"] != invoice_id or earned_fact["source_entity_id"] != invoice_id):
+        raise finance.DomainError("METRON_EMAIL_RECOVERY_NOT_READY")
     relations = []
     for relation_type, endpoint_type in (("SETTLES", "INVOICE_SETTLEMENT"), ("ALLOCATES", "EARNED_CAPITAL")):
         endpoint = fact_by_type[registry.label(endpoint_type)]
