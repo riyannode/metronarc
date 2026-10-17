@@ -2,7 +2,7 @@
 
 METRON's business workflow starts in an interactive chat. The agent calls METRON's local finance CLI for you; users do not need to type Python commands for business operations.
 
-**Existing operators:** Codex installation and fresh-session recovery already PASS. METRON v0.2.0 is installed and enabled at post-merge source `dccb9c4497534118841f3819366362725b15b7be`; source and installed cache matched 47/47 tracked files, including `DELIVERABLE`, and a new Codex session loaded all four skills. Continue with the existing plugin, Circle session, wallet, and SQLite ledger. Do not reinstall, log in again, create wallets, reset SQLite, or repeat transactions merely to prove these results. See [recorded acceptance](SUBMISSION.md#current-acceptance-matrix).
+**Existing operators:** An earlier installation check matched the plugin cache to source `dccb9c4497534118841f3819366362725b15b7be` (47/47 tracked files) and loaded all four skills in a fresh Codex session; that commit is historical. The current installed and verified METRON v0.2.0 baseline is `a93781b1d799744cf758961bad1f7d7e6806e6ae`, with all four skills and merged PR #27. Continue with the existing plugin, Circle session, wallet, and SQLite ledger. Do not reinstall, log in again, create wallets, reset SQLite, or repeat transactions merely to prove these results. See [recorded acceptance](SUBMISSION.md#current-acceptance-matrix).
 
 The installation and Circle setup steps below are for new users or an explicitly authorized missing prerequisite.
 
