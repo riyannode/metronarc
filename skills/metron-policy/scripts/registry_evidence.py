@@ -111,27 +111,44 @@ def promote_staged_response(db, intent_id: str) -> dict | None:
         body, service_hash = circle.validate_service_response(context, metadata["response"])
         if hashlib.sha256(body).hexdigest() != row["service_response_sha256"]:
             raise RegistryError('METRON_REGISTRY_CONFLICT')
+    except (circle.CircleError, RegistryError, TypeError, ValueError) as exc:
+        _reject_staged_response(db, intent_id, getattr(exc, "code", "METRON_X402_RESPONSE_INVALID"))
+        return None
+
+    if row["settlement_status"] not in {"CONFIRMED", "COMPLETED"}:
+        return None
+    try:
         payment = _payment(db, intent_id)
-        if payment["provider_ref"] != row["provider_ref"]:
-            raise RegistryError('METRON_REGISTRY_CONFLICT')
-        if row["status"] == "PROMOTED":
-            fulfillment = db.execute("SELECT descriptor_json,response_blob FROM registry_v3_fulfillments WHERE spend_intent_id=?", (intent_id,)).fetchone()
-            if fulfillment is None or bytes(fulfillment["response_blob"]) != body:
-                raise RegistryError('METRON_REGISTRY_CONFLICT')
-            return {"status": "PROMOTED", "response": metadata["response"], "response_sha256": service_hash}
-        if row["settlement_status"] not in {"CONFIRMED", "COMPLETED"}:
+    except RegistryError:
+        # Finance evidence can lag the settlement state; a later recovery can retry it.
+        return None
+    if payment["provider_ref"] != row["provider_ref"]:
+        _reject_staged_response(db, intent_id, "METRON_REGISTRY_CONFLICT")
+        return None
+    if row["status"] == "PROMOTED":
+        fulfillment = db.execute("SELECT response_blob FROM registry_v3_fulfillments WHERE spend_intent_id=?", (intent_id,)).fetchone()
+        if fulfillment is None or bytes(fulfillment["response_blob"]) != body:
+            _reject_staged_response(db, intent_id, "METRON_REGISTRY_CONFLICT")
             return None
+        return {"status": "PROMOTED", "response": metadata["response"], "response_sha256": service_hash}
+    try:
         captured = capture(db, intent_id, metadata["response"])
         with store.transaction(db):
             db.execute("UPDATE x402_response_staging SET status='PROMOTED',error_code=NULL,updated_at=? WHERE spend_intent_id=? AND status='STAGED'",
                        (finance_now(), intent_id))
         return {"status": "PROMOTED", "fulfillment_id": captured["id"], "response": metadata["response"], "response_sha256": service_hash}
-    except (circle.CircleError, RegistryError, sqlite3.Error, TypeError, ValueError) as exc:
-        code = getattr(exc, "code", "METRON_X402_RESPONSE_INVALID")
-        with store.transaction(db):
-            db.execute("UPDATE x402_response_staging SET status='REJECTED',error_code=?,updated_at=? WHERE spend_intent_id=? AND status='STAGED'",
-                       (code, finance_now(), intent_id))
+    except RegistryError as exc:
+        _reject_staged_response(db, intent_id, exc.code)
         return None
+    except sqlite3.Error:
+        # Keep the staged bytes intact; capture or the status update can be retried safely.
+        return None
+
+
+def _reject_staged_response(db, intent_id: str, code: str) -> None:
+    with store.transaction(db):
+        db.execute("UPDATE x402_response_staging SET status='REJECTED',error_code=?,updated_at=? WHERE spend_intent_id=? AND status='STAGED'",
+                   (code, finance_now(), intent_id))
 
 
 def _payment(db, intent_id: str):
