@@ -375,20 +375,30 @@ def execute(args: argparse.Namespace) -> object:
                 set_spend_unknown(intent_id,provider_ref,provider_amount,"PAYMENT_REFERENCE_RECORDED",metadata["scheme"])
                 circle.validate_service_payment_metadata(metadata,intent["max_cost_atomic"],intent["payee_address"],chain(),intent["payment_scheme"])
                 if not provider_ref: raise circle.CircleError("METRON_PAYMENT_AMBIGUOUS")
+                registry_evidence.stage_response(db,intent_id,provider_ref,body,response)
                 if metadata["scheme"].lower()=="gatewaywalletbatched":
                     authoritative=circle.gateway_x402_transfer(provider_ref,chain())
                 else:
                     authoritative=circle.find_transaction(circle.transactions(wallet,chain()),provider_ref)
+                registry_evidence.note_settlement(db,intent_id,authoritative.get("status"))
                 record=finance.record_spend_result(db,intent_id,authoritative,gateway_expected_sender)
                 if record["status"]=="FAILED":
                     return {"record":record,"service_response":metadata["response"]}
-                if record["status"]!="CONFIRMED": raise circle.CircleError("METRON_PAYMENT_AMBIGUOUS")
-                registry_result=registry_after_spend(db,intent_id,metadata["response"])
+                if record["status"]!="CONFIRMED":
+                    return {"record":record,"fulfillment_status":"STAGED"}
+                promoted=registry_evidence.promote_staged_response(db,intent_id)
+                registry_result=registry_after_spend(db,intent_id,promoted["response"] if promoted else None)
                 return {"record":record,"registry":registry_result,"service_response":metadata["response"]}
             except (circle.CircleError,finance.DomainError):
+                registry_evidence.note_settlement(db,intent_id,"ambiguous")
+                set_spend_unknown(intent_id,provider_ref,provider_amount)
+                raise
+            except registry.RegistryError:
+                registry_evidence.note_settlement(db,intent_id,"ambiguous")
                 set_spend_unknown(intent_id,provider_ref,provider_amount)
                 raise
             except Exception:
+                registry_evidence.note_settlement(db,intent_id,"ambiguous")
                 set_spend_unknown(intent_id,provider_ref,provider_amount)
                 raise circle.CircleError("METRON_PAYMENT_AMBIGUOUS") from None
         if operation=="deal-create": return finance.create_deal(db,data)
@@ -412,6 +422,30 @@ def execute(args: argparse.Namespace) -> object:
             if (args.id or "").startswith("SI-"):
                 intent=db.execute("SELECT * FROM spend_intents WHERE id=?",(args.id,)).fetchone()
                 if intent is None: raise finance.DomainError("METRON_SPEND_NOT_FOUND")
+                if intent["status"]=="EXECUTED":
+                    existing=db.execute(
+                        "SELECT pe.id,ev.id AS evidence_id,je.id AS journal_id,pe.status,pe.direction,pe.currency,pe.provider,"
+                        "pe.amount_atomic AS payment_amount,ev.provider_ref,ev.amount_atomic,"
+                        "je.status AS journal_status,COALESCE(SUM(jl.debit_atomic),0) AS debit,"
+                        "COALESCE(SUM(jl.credit_atomic),0) AS credit,COUNT(jl.id) AS line_count FROM payment_entries pe "
+                        "JOIN payment_evidence ev ON ev.payment_entry_id=pe.id "
+                        "JOIN journal_entries je ON je.source_type='PAYMENT_ENTRY' AND je.source_id=pe.id "
+                        "JOIN journal_lines jl ON jl.journal_entry_id=je.id "
+                        "WHERE pe.source_type='SPEND_INTENT' AND pe.source_id=? GROUP BY pe.id,ev.id,je.id",(args.id,)
+                    ).fetchall()
+                    if (len(existing)!=1 or existing[0]["status"]!="CONFIRMED" or existing[0]["direction"]!="OUT"
+                            or existing[0]["currency"]!="USDC" or existing[0]["provider"]!="CIRCLE"
+                            or existing[0]["payment_amount"]!=intent["provider_amount_atomic"]
+                            or existing[0]["journal_status"]!="POSTED" or existing[0]["line_count"]<2
+                            or existing[0]["provider_ref"]!=intent["provider_payment_id"]
+                            or existing[0]["amount_atomic"]!=intent["provider_amount_atomic"]
+                            or existing[0]["debit"]!=existing[0]["credit"]):
+                        raise finance.DomainError("METRON_PAYMENT_AMBIGUOUS")
+                    promoted=registry_evidence.promote_staged_response(db,args.id)
+                    record={"id":existing[0]["id"],"evidence_id":existing[0]["evidence_id"],
+                            "journal_id":existing[0]["journal_id"],"status":"CONFIRMED","recovered":True}
+                    record["registry"]=registry_after_spend(db,args.id,promoted["response"] if promoted else None)
+                    return record
                 if intent["status"] not in {"SUBMITTED","UNKNOWN"}: raise finance.DomainError("METRON_PAYMENT_AMBIGUOUS")
                 ref=args.provider_ref or intent["provider_payment_id"]
                 if not ref: raise finance.DomainError("METRON_PAYMENT_AMBIGUOUS")
@@ -419,14 +453,20 @@ def execute(args: argparse.Namespace) -> object:
                     raise finance.DomainError("METRON_RECONCILIATION_MISMATCH")
                 expected_sender=None
                 if (intent["executed_payment_scheme"] or intent["payment_scheme"]).lower()=="gatewaywalletbatched":
-                    gateway_state=circle.gateway_balance(wallet,chain())
-                    expected_sender=circle.gateway_backing_eoa(gateway_state,wallet)
-                    payment=circle.gateway_x402_transfer(ref,chain())
+                    try:
+                        gateway_state=circle.gateway_balance(wallet,chain())
+                        expected_sender=circle.gateway_backing_eoa(gateway_state,wallet)
+                        payment=circle.gateway_x402_transfer(ref,chain())
+                    except circle.CircleError:
+                        registry_evidence.note_settlement(db,args.id,"ambiguous")
+                        raise
                 else:
                     payment=circle.find_transaction(circle.transactions(wallet,chain()),ref)
+                registry_evidence.note_settlement(db,args.id,payment.get("status"))
                 record=finance.record_spend_result(db,args.id,payment,expected_sender)
                 if record.get("status")=="CONFIRMED":
-                    record["registry"]=registry_after_spend(db,args.id)
+                    promoted=registry_evidence.promote_staged_response(db,args.id)
+                    record["registry"]=registry_after_spend(db,args.id,promoted["response"] if promoted else None)
                 return record
             if (args.id or "").startswith("PE-"):
                 raise finance.DomainError("METRON_LEGACY_INTERNAL_TRANSFER_UNSUPPORTED")
