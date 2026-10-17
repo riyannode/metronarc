@@ -1,16 +1,16 @@
 # Tameion submission readiness
 
-Pilot evidence checked 2026-10-16; V3 documentation status updated 2026-10-17 (Asia/Jakarta). This page records the pilot evidence available in METRON's existing local ledger and the remaining submission gates. It is not a claim that the hackathon application or a video has been submitted. The event page lists the deadline as October 17, 2026 at 11:59 PM ET and requires a public GitHub repository plus a recorded video under three minutes; a deployed link is optional but strongly encouraged.
+Evidence checked 2026-10-17 from the existing local SQLite ledger, installed METRON cache, merged GitHub state, and public Arc Testnet Explorer. This page prepares updates for the operator's existing submission; it does not claim the form or video has been submitted. The deadline is October 17, 2026 at 11:59 PM ET. The submission requires a public repository and a recorded video under three minutes; a deployed link is optional but encouraged.
 
 ## Thesis
 
-**METRON is an autonomous business operator with bounded authority:** it can find and negotiate customer work, preserve accepted terms, request a distinct human approval, issue an invoice, verify Circle settlement, post balanced accounting, and reserve policy-defined earned operating capital for later work. Its local SQLite state, deterministic finance CLI, Circle evidence, and human approval boundaries remain auditable across host sessions.
+**METRON is a local chat-operated economic control plugin for AI agents.** It coordinates customer email, deal terms, a separate human approval, invoicing, Circle settlement, durable SQLite accounting, and policy-defined operating capital. Its bounded spend policy can authorize a later x402 purchase, while preserving the evidence and limitations of that action.
 
-The project aligns with the [Tameion Agents Hackathon](https://tameion.thecanteenapp.com/), especially its Autonomous Business Operator request: an agent handles business money end to end while recording why each action occurred and escalating decisions outside its limits.
+METRON aligns most directly with [RFB 04: Autonomous Business Operator](https://tameion.thecanteenapp.com/): an agent handles business money end to end while recording why each action occurred and escalating decisions outside its limits. It also touches RFB 02 through invoice and receivables workflows.
 
 ## Problem and workflow
 
-Small operators coordinate leads, agreed scope, invoices, payment receipts, and vendor spending across separate tools. A model prompt cannot provide durable idempotency or accounting. METRON binds these steps to one local ledger and executes payments only through the supported Circle path.
+Small operators coordinate leads, agreed scope, invoices, payment receipts, and vendor spending across separate tools. A model prompt alone does not provide durable idempotency or accounting. METRON binds these steps to one local ledger and settles payments through Circle on Arc Testnet.
 
 The plugin contains four skills:
 
@@ -19,63 +19,59 @@ The plugin contains four skills:
 - `metron-invoice`: deterministic private invoice PDF rendering from posted SQLite records.
 - `metron-payment`: Circle and Arc settlement verification for incoming revenue, x402, and Gateway; runtime CLI remains the authority.
 
-The implementation uses a shared Circle Agent Wallet, Circle CLI, the exact and `GatewayWalletBatched` x402 schemes, optional Gateway liquidity, Gmail connector calls, and one SQLite ledger. Skills are procedures, not authorization or runtime validation. The product does not use a separate wallet per goal, a second ledger, or an email/payment engine.
+The implementation uses Circle Agent Wallet and Circle CLI for Arc Testnet settlement, exact and `GatewayWalletBatched` x402, host-connected Gmail, and one durable SQLite ledger. Skills are procedures, not authorization or runtime validation. METRON does not use a separate wallet per goal, a second ledger, or a hosted email/payment engine.
 
 ## Verified pilot evidence
 
-All amounts below are Arc **Testnet** USDC, not mainnet revenue or production customer traction. The buyer is a test scenario, not an independently onboarded business.
+All amounts below are Arc **Testnet** USDC, not mainnet revenue or independent business traction. The controlled E2E buyer is not an independently onboarded business.
 
 | Gate | Evidence and result |
 |---|---|
-| Customer acceptance and approval | One existing email-bound deal remains `CLOSED_WON` after linked customer acceptance and a separate `HUMAN_APPROVED` event. The stored scope covers public-source research of Tidio, Crisp, and Intercom, a 3–5 page PDF with feature/price links, and three positioning recommendations for Indonesian UMKM. |
-| Invoice and incoming revenue | `INV-000001` is `PAID`; Circle provider reference `5ac4d703-9210-5b36-b887-c1053653ed77`; Arc Testnet transaction `0xe257b96faffecf815f3720c0cbbfe4bdcd1763d0b7685ef530f463a7a79e50eb`; 22 USDC / 22,000,000 atomic units. Payment Entry `PE-000003`, Evidence `EV-000003`, and posted balanced journal `JE-000004` are present. |
-| Reinvestment accounting | The persisted 10% policy allocated 2.20 USDC of reconciled receipts to earned operating capital. This is a local policy allocation, not a separate wallet or an additional payment. |
-| Customer fulfillment | A four-page research report was sent as a Gmail reply in the existing thread. The local artifact is 86,554 bytes with SHA-256 `699ef0478c44a74a3f6a03724b3172ffe35b270d783ce5fb109646847ea80a31`. Gmail readback matched the message/thread, PDF filename, MIME type, and byte size; the durable `DELIVERABLE` action is `CONFIRMED`. The report is a local/private deliverable artifact, not included in this repository. |
-| Historical x402 expenses | `SI-000001` (AuraGate Oracle Check, 0.005 USDC) and `SI-000002` (QuickNode Arc Testnet RPC, 0.0001 USDC) used `GatewayWalletBatched`. Their confirmed Circle evidence, Payment Entries `PE-000001`/`PE-000002`, Evidence `EV-000001`/`EV-000002`, and balanced expense journals `JE-000001`/`JE-000002` predate the incoming revenue. They are **not** post-revenue self-funding evidence. Their service response payloads are not retained as durable deliverable artifacts in SQLite. |
-| Historical V2 EconomicRegistry | `REG-000001` and `REG-000002` are confirmed SPEND provenance records. No revenue record was committed: revenue attribution was skipped because the deal has no explicit originating Spend Intent (`NO_EXPLICIT_ATTRIBUTION`). This provenance status does not change the PAID invoice or accounting. |
-| Persistence and recovery | The current ledger passes SQLite `integrity_check`. The account lock was released after delivery. The prior email send remains `UNKNOWN`; two old inbound messages remain `PROCESSING`. Neither state was changed or retried. The dashboard was regenerated from SQLite. |
+| Newer customer flow | `DEAL-000002` is `CLOSED_WON` for 30 USDC. Customer acceptance and a separate `HUMAN_APPROVED` event are recorded. `INV-000002` is `PAID`; Gmail invoice and `DELIVERABLE` actions are `CONFIRMED`. The durable deliverable state does not make the controlled buyer independent traction. |
+| Incoming 30 USDC settlement | `PE-000004` is reconciled for 30 USDC. Circle provider reference `2c4ad042-2c2b-5d04-90f4-29f6bcb8eb40` is separate from Arc transaction [`0x3431ab450fbc6a99f785125d7448d2f66b72c133cb35de3adedb42ddb5c18a8a`](https://explorer.testnet.arc.io/tx/0x3431ab450fbc6a99f785125d7448d2f66b72c133cb35de3adedb42ddb5c18a8a). The public explorer reports a successful transaction containing 30,000,000 USDC atomic units. |
+| Revenue accounting and capital | The invoice journal `JE-000005` and payment journal `JE-000006` are each posted and balanced. The 10% policy allocated 3.00 USDC from this receipt to operating capital; the existing policy balance is 5.20 USDC total, including the earlier 2.20 USDC allocation. This is an internal policy allocation, not another transfer. |
+| Earlier 22 USDC pilot | This is a distinct flow: `INV-000001`, `PE-000003`, `EV-000003`, and `JE-000004`; Circle provider reference `5ac4d703-9210-5b36-b887-c1053653ed77` and Arc transaction [`0xe257b96faffecf815f3720c0cbbfe4bdcd1763d0b7685ef530f463a7a79e50eb`](https://explorer.testnet.arc.io/tx/0xe257b96faffecf815f3720c0cbbfe4bdcd1763d0b7685ef530f463a7a79e50eb) are separate identifiers. Do not substitute this flow's provider reference or provenance for the newer 30 USDC invoice. |
+| Earlier x402 expenses | Before the customer receipts, `SI-000001` settled 0.005 USDC and `SI-000002` settled 0.0001 USDC through Circle Gateway. Their separate confirmed evidence and balanced expense journals are `PE-000001`/`EV-000001`/`JE-000001` and `PE-000002`/`EV-000002`/`JE-000002`. Explorer transactions: [`0xbd3a8147afc531ee61396cf8354bfbeb270f462565330d6b9c2b651d8ca62011`](https://explorer.testnet.arc.io/tx/0xbd3a8147afc531ee61396cf8354bfbeb270f462565330d6b9c2b651d8ca62011) and [`0x8c4c487be20aefb45249b3187617cef9d9eebcd7dad45dde1fe7dd455074836d`](https://explorer.testnet.arc.io/tx/0x8c4c487be20aefb45249b3187617cef9d9eebcd7dad45dde1fe7dd455074836d). They are not post-revenue spending. |
+| Later QuickNode x402 spend | `SI-000003` is `EXECUTED` for 100 atomic USDC (0.0001 USDC) with `GatewayWalletBatched`. Circle payment `PE-000005`, Gateway evidence `EV-000005`, and posted balanced expense journal `JE-000007` are confirmed. Circle provider reference `3302c41e-2efc-4154-a6f8-4c88d24802f6` is separate from the settlement transaction [`0x84898e4d9d4add831c6594fc22b6fe596cc21cd869cfcb8eb18cca05881439c0`](https://explorer.testnet.arc.io/tx/0x84898e4d9d4add831c6594fc22b6fe596cc21cd869cfcb8eb18cca05881439c0). |
+| QuickNode fulfillment | **MISSING.** The original QuickNode API response was not retained; the local ledger has no fulfillment artifact for `SI-000003`. A successful payment is not proof that the response was recovered. PR #27 stages responses for future transactions and did not retroactively recover this one. |
+| EconomicRegistry V3 | Five confirmed fact records and two confirmed relationship records are present on Arc Testnet. They include the 30 USDC revenue/settlement/earned-capital provenance and an `X402_SPEND` fact for `SI-000003`; the historical 22 USDC payment is separate. V3 records provenance only and do not add revenue or transfer value. No `SUPPORTS` causal relationship between the QuickNode expense and the earlier customer revenue is established. The QuickNode registry record is [`0x1dccb877d25b26d5005c3afe69546b4a084f41b62cd7c742e5e31a5af99a4393`](https://explorer.testnet.arc.io/tx/0x1dccb877d25b26d5005c3afe69546b4a084f41b62cd7c742e5e31a5af99a4393). |
+| Runtime persistence | The local ledger passes SQLite `integrity_check`. Two unrelated inbound messages remain `PROCESSING`, and an older separate email reply remains `UNKNOWN`; none were changed or retried for this submission check. |
 
-The research artifact's cited source URLs and examination date are inside the PDF. Current pricing is a dated public-page snapshot, not a quote. The report separates vendor-published facts from analysis and recommendations; its statements about Indonesian demand and language quality are not presented as measured market data.
+The recorded Circle payment flows are listed once each: two distinct incoming invoice settlements totaling 52 USDC, and three x402 expenses totaling 0.0052 USDC (0.005 + 0.0001 + 0.0001). Documented gross payment transfers total 52.0052 USDC, excluding Arc transaction fees. This is not revenue or independent traction. Do not add accounting journals, EconomicRegistry records, or policy allocations as additional transfers.
 
-## Self-funding gate
+## Operating capital and causal limits
 
-No post-revenue Spend Intent or payment was created. The active earned-capital policy contains 2.20 USDC but sets both `max_spend_per_action` and `max_daily_spend` to 100 atomic units (0.0001 USDC); the 1 USDC minimum wallet balance also remains in force. Read-only Circle Marketplace searches for research, web search, analytics, and market data returned no useful Arc Testnet (`eip155:5042002`) service within that cap. Listings on Arc mainnet (`eip155:5042`) or other networks are not substitutes. Changing policy or buying a service requires a separate operator decision.
+The 100-atomic-USDC QuickNode spend is a confirmed x402 purchase after the customer receipts in time. The active policy has 100-atomic-USDC per-action and daily caps, a 1 USDC minimum wallet balance, and 5.20 USDC of policy-defined operating capital. Temporal order and available capital do not prove that either customer payment caused or funded this specific purchase. METRON makes no causal `SUPPORTS` claim between the QuickNode expense and earlier customer revenue.
 
 ## Current acceptance matrix
 
 | Acceptance area | Status | Evidence / limitation |
 |---|---|---|
-| Plugin installation | **PASS** | METRON `0.2.0` is installed and enabled in Codex interactive chat. Post-merge source/marketplace/cache verification matched all 47 files to `dccb9c4497534118841f3819366362725b15b7be`; four skills loaded in a new session. This installed-baseline PASS does not establish V3 activation or live E2E acceptance. |
-| Policy and wallet | **PASS** | Circle reads 51.9 USDC in each of its native and ERC-20 Arc Testnet representations; they are not summed as one balance. Earned capital and hard caps are shown separately. |
-| Historical x402 payments | **PASS** | Two Circle-confirmed pre-revenue expenses and journals exist. Post-revenue x402 was not executed, and historical service-output artifacts are not durably retained; no V3 attribution is inferred. |
-| Gmail negotiation | **PASS** | The existing thread contains a confirmed 22 USDC offer, customer acceptance, and buyer-confirmed invoice terms. A prior separate reply action stays `UNKNOWN`. |
-| Human approval | **PASS** | The deal's final human approval is persisted separately from customer acceptance. |
-| Invoice and Gmail delivery | **PASS** | Invoice `INV-000001` is PAID; original invoice message and final deliverable message are read back in the existing thread. |
-| Incoming Circle settlement | **PASS** | Circle reference, Arc transaction/receipt, asset, amount, payer, payee, chain, and confirmed state were verified before reconciliation. |
-| Accounting and journals | **PASS** | Payment and expense evidence are unique; posted journals are balanced; reinvestment is 2.20 USDC. |
-| Customer fulfillment | **PASS** | Four-page report artifact and confirmed Gmail outbox/readback; test buyer is not independent traction. Gmail exposes no attachment checksum, so provider readback was verified by filename, MIME type, and size against the hashed local artifact. |
-| Post-revenue reinvestment x402 | **BLOCKED** | Current per-action and daily caps are 0.0001 USDC; Marketplace search found no useful configured-network candidate within policy. No Spend Intent exists and no payment was attempted. |
-| Fresh-session recovery | **PASS** | A new Codex interactive session loaded all four installed skills and recovered the existing SQLite ledger after merge `dccb9c4497534118841f3819366362725b15b7be`. Integrity and persisted finance/email/registry state passed; unresolved sends were preserved. This existing E2E evidence concerns the installed baseline, not activation or live E2E of the deployed V3 contract. |
-| Tameion submission readiness | **BLOCKED** | The repository is currently private and no recorded demo exists. Current event instructions require a public GitHub link and recorded video under three minutes; a deployment link is optional. Do not make the repository public or claim a video until those steps are separately authorized and completed. |
+| Public repository | **PASS** | GitHub reports `riyannode/metronarc` as `PUBLIC`; `master` is at `a93781b1d799744cf758961bad1f7d7e6806e6ae`. PR #26 is closed without merge; PR #27 is merged at this baseline. |
+| Plugin baseline | **PASS** | Installed METRON cache version `0.2.0` is at the expected baseline and contains the four skills. PR #27 stages x402 responses before settlement readback to support future fulfillment recovery. This does not recover `SI-000003`'s missing response. |
+| Gmail negotiation and human approval | **PASS** | The newer deal records customer acceptance and a separate human approval. The controlled E2E buyer is not independent traction. |
+| Invoice and incoming settlement | **PASS** | The separate 22 USDC and 30 USDC invoices are both paid with their own Circle and Arc evidence. The newer 30 USDC flow is `INV-000002` / `PE-000004` / `EV-000004`. |
+| Accounting and earned operating capital | **PASS** | Posted invoice/payment/spend journals balance. The 30 USDC flow added 3.00 USDC under the 10% policy; earned operating capital is 5.20 USDC total. |
+| EconomicRegistry V3 | **PASS** | Five confirmed facts and two confirmed relationships are read back in the existing local ledger; the confirmed `X402_SPEND` record for `SI-000003` is included. No causal `SUPPORTS` claim is established for that spend and earlier customer revenue. |
+| QuickNode fulfillment | **MISSING** | Original response not retained; no fulfillment artifact exists for `SI-000003`. PR #27 applies to future response staging only. |
+| Video | **REQUIRED** | No recording has been produced or verified. Use [the 2:45 demo script](DEMO.md), record with real screens, inspect the final file, and keep it under three minutes. |
+| Website | **PASS** | The repository homepage is [`https://metronhq.vercel.app`](https://metronhq.vercel.app) and returned HTTP 200 during this check. |
 
 ## Limitations and submission steps
 
-- No mainnet payment, independent customer, or post-revenue vendor purchase is evidenced.
-- Historical V2 revenue EconomicRegistry provenance is `SKIPPED / NO_EXPLICIT_ATTRIBUTION`; do not describe revenue as committed on-chain.
-- Circle wallet limits are not assumed on Arc Testnet. METRON's policy and instruction-based human approval run locally and are not cryptographic isolation from the operator or host.
-- Test results, PDFs, and synthetic fixtures are not customer traction. Only the one Circle-reconciled Arc Testnet receipt is counted as payment evidence.
-- The repository is private, so external judges cannot currently clone or install it. Public visibility needs separate owner authorization and a secrets/PII review.
-- No video recording has been produced. Use [the demo storyboard](DEMO.md), record and inspect an under-three-minute video, then submit the public repository and video through the official event form before the posted deadline.
-- V3 deployment and source verification are complete. Installed-plugin activation and live V3 E2E still require a separate approved rollout. Existing Codex baseline verification stays PASS; do not repeat payments or reset state. Keep `plugin.json` at `0.2.0` unless a separately approved release plan requires a version change.
+- No mainnet payment or independently onboarded business is evidenced. Both customer flows are controlled E2E test scenarios.
+- The 100-atomic-USDC QuickNode expense settled successfully, but its original response is missing. Do not claim successful fulfillment for this intent.
+- The revenue and spend records are auditable; no causal link from the QuickNode expense to earlier revenue has been proven.
+- Circle Agent Wallet and local policy are used on Arc Testnet. Local instruction-based approvals are not cryptographic isolation from the operator or host.
+- No video recording has been produced. The existing Tameion response needs its repository, website, and video fields updated by the operator; do not submit a second form.
+- The public repository is ready at [`https://github.com/riyannode/metronarc`](https://github.com/riyannode/metronarc). The optional deployed site is [`https://metronhq.vercel.app`](https://metronhq.vercel.app).
 
 ## First-time user setup
 
 Follow [Local installation](INSTALL.md): install the marketplace plugin, confirm the four skills in a new host session, initialize only a brand-new `~/.metron/` ledger, configure the user's Circle Agent Wallet and explicit goal policy, and define each customer service through the operator-owned catalog. Circle Terms acceptance, wallet authentication, and any payment require the wallet owner's own authorized actions.
 
-Circle CLI baseline: the verified pilot used 1.2.1. It accepts `--testnet` even though login help omits the flag; this alone does not require an update. Setup remains for new users, not a request to repeat the existing E2E.
-
 ## V3 deployment and acceptance status
 
-EconomicRegistry V3 separates independent Circle revenue from optional spend attribution. **DEPLOYED / source verified:** Arc Testnet (`5042002`) at [`0xd26D5148deF3Eb37a0C28CE23674f58455918D7d`](https://explorer.testnet.arc.io/address/0xd26D5148deF3Eb37a0C28CE23674f58455918D7d); successful receipt, pinned runtime and `VERSION()==3` readback passed. **ACTIVATED: NOT ACTIVATED** in the installed Codex plugin. **LIVE VERIFIED: NOT LIVE VERIFIED**; V3 E2E through that plugin has not been exercised. Deployment does not change the existing Codex pilot PASS evidence or imply live financial acceptance. Optional `SUPPORTS` needs source evidence and specific operator approval; it is not required to record revenue. The existing 22 USDC receipt has not been imported into V3; any historical representation needs original Circle evidence, `historical=true`, and explicit operator approval. It cannot count as new revenue. V2 records and unresolved submissions remain historical and are never automatically resubmitted. See [V3 deployment and migration plan](REGISTRY_V3.md).
+EconomicRegistry V3 is deployed and source verified on Arc Testnet (`5042002`) at [`0xd26D5148deF3Eb37a0C28CE23674f58455918D7d`](https://explorer.testnet.arc.io/address/0xd26D5148deF3Eb37a0C28CE23674f58455918D7d). Existing readback shows five confirmed facts and two confirmed relationships. The V3 fact for the newer QuickNode expense is confirmed, as are the 30 USDC settlement and earned-capital provenance records. These records do not change Circle payment authority or SQLite accounting truth. No historical 22 USDC record was imported, and no `SUPPORTS` causal relationship between the QuickNode spend and earlier customer revenue is established. See [V3 deployment and migration details](REGISTRY_V3.md).
 
-Host compatibility: Codex interactive chat installation and recovery remain VERIFIED/PASS. See the [host compatibility note](INSTALL.md#supported-hosts) for the separately untested ChatGPT Desktop local host.
+Host compatibility: Codex interactive chat installation and recovery are VERIFIED/PASS. See the [host compatibility note](INSTALL.md#supported-hosts) for other hosts.

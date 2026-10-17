@@ -4,7 +4,7 @@ This follow-up reviews PR #22 baseline `9c73dc9`. All three findings reproduce: 
 
 ## Deployment and acceptance status
 
-**DEPLOYED / source verified:** Arc Testnet (`5042002`), [`0xd26D5148deF3Eb37a0C28CE23674f58455918D7d`](https://explorer.testnet.arc.io/address/0xd26D5148deF3Eb37a0C28CE23674f58455918D7d). Receipt, exact pinned runtime and `VERSION()==3` readback passed; the explorer reports full source verification. The installed Codex plugin is **NOT ACTIVATED** for V3, and its V3 E2E is **NOT LIVE VERIFIED**. See [deployment evidence](REGISTRY_V3.md#deployment-and-acceptance-status). These are separate gates; local tests and deployment do not establish live workflow acceptance.
+**DEPLOYED / source verified:** Arc Testnet (`5042002`), [`0xd26D5148deF3Eb37a0C28CE23674f58455918D7d`](https://explorer.testnet.arc.io/address/0xd26D5148deF3Eb37a0C28CE23674f58455918D7d). Receipt, exact pinned runtime and `VERSION()==3` readback passed; the explorer reports full source verification. The installed Codex METRON plugin v0.2.0 is verified, and V3 is **ACTIVE / live verified for the documented controlled workflow**, with five confirmed facts and two confirmed relationships. The deployment record in [deployment evidence](REGISTRY_V3.md#deployment-and-acceptance-status) captures the earlier state before those workflow records were submitted; deployment and current workflow acceptance remain distinct verification gates.
 
 ## Transition and activation
 
@@ -54,7 +54,7 @@ The shareable `metron.attribution-evidence/1` manifest contains from/to fact IDs
 
 SUPPORTS receipts additionally bind `attribution` to the basis hash, source Circle reference and exact endpoints. Offline verification checks this manifest's integrity, not possession/authenticity of the raw artifacts. `registry-audit-attribution --id RV3-...` rehashes retained blobs and rechecks the local payment and invoice/deal/customer binding. It reports `source_artifacts_verified:true` with `independent_attribution_verified:false`: the operator selected the evidence and asserted the relationship; the service output's causal contribution or usefulness is not independently proven. Neither Circle nor customer signed that assertion. This is auditable provenance, not proof of business causality.
 
-The two historical x402 payments lack durably retained service outputs. This patch does not invent them, create an attribution from chronology, repeat a payment, or relabel historical activity as a V3 E2E.
+The two earlier x402 payments lack durably retained service outputs. Later `SI-000003` settled the QuickNode request for 100 atomic USDC; Circle payment evidence, its expense journal and the V3 `X402_SPEND` are confirmed, but the original service response remains MISSING. Merged PR #27 stages responses for future transactions and did not restore this response. This patch does not invent outputs, create an attribution from chronology, repeat a payment, or relabel historical activity as a V3 E2E. The controlled buyer is not independent commercial traction, and no causal `SUPPORTS` relationship between the QuickNode expense and earlier revenue is proven.
 
 ## Transactions and cost
 

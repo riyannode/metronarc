@@ -51,7 +51,7 @@ a, button { touch-action: manipulation; }
 .docs-page { min-height: 100vh; background: #fff; color: #161716; }
 .docs-sidebar__source { display: inline-flex; align-items: center; gap: 6px; color: #1D5FA8; font-size: 12px; font-weight: 600; }
 .docs-layout-page { padding: 128px 24px 100px; }
-.docs-layout { display: grid; width: min(100%, 1280px); grid-template-columns: 205px minmax(0, 1fr) 155px; align-items: start; gap: clamp(28px, 4.5vw, 64px); margin: 0 auto; }
+.docs-layout { display: grid; width: min(100%, 1390px); grid-template-columns: 205px minmax(0, 1fr) 155px; align-items: start; gap: clamp(28px, 4.5vw, 64px); margin: 0 auto; }
 .docs-sidebar, .docs-toc { position: sticky; top: 100px; min-width: 0; }
 .docs-sidebar__nav { display: grid; gap: 28px; }
 .docs-sidebar__group { display: grid; justify-items: start; gap: 10px; }

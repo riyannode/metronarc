@@ -66,9 +66,9 @@ const articles: Record<string, DocsArticle> = {
       },
       {
         id: 'supported-scope', title: 'Supported scope', content: <>
-          <p><strong>Codex plugin installation and fresh-session recovery: VERIFIED / PASS.</strong> The completed Arc Testnet pilot includes Gmail negotiation, human approval, the 22 USDC PAID invoice, Circle reconciliation, balanced accounting, and confirmed customer delivery.</p>
+          <p><strong>Codex plugin installation and fresh-session recovery: VERIFIED / PASS.</strong> The newer Arc Testnet flow records Gmail negotiation, a separate human approval, the 30 USDC PAID invoice, Circle reconciliation, balanced accounting, and a confirmed deliverable. The older 22 USDC pilot is a separate invoice and settlement.</p>
           <p>Circle is the implemented payment provider. Paid x402 requests support <code>exact</code> and <code>GatewayWalletBatched</code> on Arc Testnet.</p>
-          <p>The two historical x402 payments passed before revenue. No post-revenue x402 payment was executed; historical V2 revenue attribution remains <code>SKIPPED / NO_EXPLICIT_ATTRIBUTION</code>. V3 is deployed and source verified on Arc Testnet. The installed Codex plugin is not activated for V3, and live V3 E2E remains unverified; these are separate from the existing pilot PASS results.</p>
+          <p>METRON later settled QuickNode x402 intent <code>SI-000003</code> for 100 atomic USDC through Circle Gateway. Its original API response was not retained, so fulfillment remains missing; merged PR #27 stages responses for future transactions and did not recover this one. EconomicRegistry V3 has five confirmed facts and two confirmed relationships, including the <code>X402_SPEND</code> fact. No causal <code>SUPPORTS</code> relationship between this expense and earlier customer revenue is established.</p>
           <p>Testnet records do not prove mainnet support or production readiness. The dashboard on the landing page uses illustrative data.</p>
           <a className="docs-inline-link" href="/docs/installation">Set up METRON <ArrowRight size={14} /></a>
         </>,
@@ -85,17 +85,17 @@ const articles: Record<string, DocsArticle> = {
           <li>A local Codex chat is the verified host. METRON runs its Python code and <code>~/.metron/</code> locally; Circle CLI must be callable by that runtime.</li>
           <li>Python 3.11 or later. Circle CLI needs Node.js 20.18.2 or later and npm.</li>
           <li>Bun is only needed to render invoice PDFs. Foundry is only needed for contract build and tests.</li>
-          <li>The repository is private. GitHub access is required to install it.</li>
+          <li>The repository is public at <a href={repository} target="_blank" rel="noreferrer">github.com/riyannode/metronarc</a>.</li>
         </ul>,
       },
       {
         id: 'install-plugin', title: 'Install the plugin', content: <>
-          <p><strong>Existing operators: installation and fresh-session recovery PASS.</strong> METRON v0.2.0 is already installed and enabled with all four skills after the PR #20 refresh. Do not reinstall, log in again, create a wallet, reset SQLite, or repeat transactions to prove these results.</p>
-          <p>The V3 contract is deployed and source verified on Arc Testnet. The installed plugin is enabled for the existing Codex business workflow, but it is not activated for V3 and live V3 E2E remains unverified. Deployment does not require existing operators to reinstall, reset their ledger, or repeat a payment. In the V3 runtime, new settled sources enter a visible durable backlog while V3 is disabled. Activation verifies the approved chain, ABI and runtime bytecode; it never submits backlog. Selected resume and historical imports require separate approval. See <a href="/docs/architecture#economic-registry">V3 deployment and acceptance status</a>.</p>
+          <p><strong>Existing operators: installation and fresh-session recovery PASS.</strong> METRON v0.2.0 is installed with all four skills at the verified <code>a93781b1d799744cf758961bad1f7d7e6806e6ae</code> baseline. PR #27 is merged and stages x402 responses for future fulfillment recovery. Do not reinstall, log in again, create a wallet, reset SQLite, or repeat transactions to prove these results.</p>
+          <p>EconomicRegistry V3 is active in the verified local workflow. Five confirmed facts and two confirmed relationships include the 30 USDC settlement and earned-capital provenance plus the QuickNode <code>X402_SPEND</code>. The QuickNode response is still missing; PR #27 did not recover it. See <a href="/docs/architecture#economic-registry">V3 deployment and acceptance status</a>.</p>
           <p>For new users, install through the Codex marketplace:</p>
           <CodeBlock label="New-user Codex installation" code={'codex plugin marketplace add riyannode/metronarc --ref master\ncodex plugin add metron@metron-local'} />
           <ol>
-            <li>Use a GitHub account with access to <a href={repository} target="_blank" rel="noreferrer">riyannode/metronarc</a>; the marketplace commands select <code>master</code>.</li>
+            <li>Install <a href={repository} target="_blank" rel="noreferrer">riyannode/metronarc</a> from its public <code>master</code> branch.</li>
             <li>Confirm METRON is enabled in Codex and start a new local chat.</li>
             <li>Ask <strong>“Use METRON. Show status.”</strong> and confirm the four skills. Local execution must reach the CLI and SQLite files on that machine.</li>
           </ol>
@@ -180,10 +180,10 @@ First check the Circle CLI METRON can call, including its WSL-to-Windows adapter
       {
         id: 'invoices', title: 'Invoices', content: <>
           <p>The finance CLI creates and posts one invoice after final deal approval. <code>metron-invoice</code> renders the persisted invoice as a private PDF and does not change financial state.</p>
-          <p><strong>Verified Codex pilot: Gmail negotiation, human approval, invoice delivery, and customer fulfillment PASS.</strong> Invoice <code>INV-000001</code> is <code>PAID</code> for 22 USDC. The final four-page report was delivered once in the existing customer thread with a <code>CONFIRMED</code> durable <code>DELIVERABLE</code> action.</p>
-          <CodeBlock format="prompt" label="Read-only chat prompt" code="Use METRON. Show invoice INV-000001 and the status of its linked deal." />
+          <p><strong>Newer verified Codex flow: Gmail negotiation, separate human approval, invoice delivery, and customer fulfillment PASS.</strong> Invoice <code>INV-000002</code> is <code>PAID</code> for 30 USDC; its durable Gmail <code>INVOICE</code> and <code>DELIVERABLE</code> actions are <code>CONFIRMED</code>. The 22 USDC <code>INV-000001</code> pilot is a distinct earlier flow.</p>
+          <CodeBlock format="prompt" label="Read-only chat prompt" code="Use METRON. Show invoice INV-000002 and the status of its linked deal." />
           <p>Issuer, customer, price, tax, due date, and wallet details must come from configuration or approved deal data. METRON does not invent them.</p>
-          <p>V3 is deployed and source verified, but the installed Codex plugin is not activated for V3 and live V3 E2E remains unverified. After separately approved activation, invoice settlement and earned-capital records describe the existing receipt. They do not create more revenue or authorize a payment. Optional <code>SUPPORTS</code> attribution is a separate claim requiring source evidence and operator approval; it never gates recording revenue.</p>
+          <p>EconomicRegistry V3 has five confirmed fact records and two confirmed relationship records in the verified workflow. They include the 30 USDC settlement and earned-capital provenance. V3 does not create more revenue or authorize a payment. Optional <code>SUPPORTS</code> attribution is a separate claim requiring source evidence and operator approval; no causal relationship between the QuickNode expense and earlier customer revenue is established.</p>
         </>,
       },
       {
@@ -208,13 +208,13 @@ First check the Circle CLI METRON can call, including its WSL-to-Windows adapter
       {
         id: 'x402', title: 'Paid services and x402', content: <>
           <p>On Arc Testnet, Circle CLI supports <code>exact</code> and <code>GatewayWalletBatched</code> x402 payments. METRON binds an approved intent to its seller, request, scheme, chain, and maximum amount.</p>
-          <p><strong>Historical x402 payments: PASS.</strong> Two Circle-confirmed <code>GatewayWalletBatched</code> expenses and their balanced journals predate revenue. Post-revenue x402 remains unexecuted; the pilot found no useful Arc Testnet service within its 0.0001 USDC per-action and daily caps.</p>
+          <p><strong>QuickNode x402: CONFIRMED.</strong> <code>SI-000003</code> executed for 100 atomic USDC (0.0001 USDC) through Circle Gateway. Circle evidence <code>EV-000005</code> and balanced journal <code>JE-000007</code> are recorded. The original QuickNode response was not retained, so fulfillment remains missing. Merged PR #27 stages responses for future requests only.</p>
           <p>A Gateway transfer is confirmed only when Circle returns matching transfer evidence and a terminal <code>confirmed</code> or <code>completed</code> status. <code>received</code> and <code>batched</code> remain unresolved.</p>
         </>,
       },
       {
         id: 'incoming-payments', title: 'Incoming USDC', content: <>
-          <p><strong>Incoming Circle reconciliation: PASS.</strong> The completed Codex pilot reconciled 22 USDC on Arc Testnet to <code>INV-000001</code>, now <code>PAID</code>, with matching Circle and Arc receipt evidence. This is a test-buyer scenario, not independent customer traction or mainnet revenue.</p>
+          <p><strong>Incoming Circle reconciliation: PASS.</strong> Two separate controlled Arc Testnet flows are reconciled: 22 USDC to <code>INV-000001</code> and 30 USDC to <code>INV-000002</code>. Each has its own Circle provider reference and Arc transaction evidence. Neither is independent customer traction or mainnet revenue.</p>
           <p>Before marking an invoice paid, METRON verifies Circle's evidence against the open invoice, amount, payer, receiving wallet, chain, and payment identity. Customer messages and pasted transaction hashes are not proof.</p>
           <p>If Circle omits asset identity for an Arc transfer, METRON also checks the transaction, successful receipt, and matching USDC system event.</p>
         </>,
@@ -222,16 +222,16 @@ First check the Circle CLI METRON can call, including its WSL-to-Windows adapter
       {
         id: 'ledger', title: 'Reconciliation and ledger', content: <>
           <p>Confirmed evidence creates a Payment Entry and a balanced journal in SQLite. An invoice becomes <code>PAID</code> only when matching incoming USDC evidence is reconciled and consumed.</p>
-          <p><strong>Pilot accounting: PASS.</strong> Three payment entries and four posted balanced journals were retained. The 10% reinvestment policy allocated 2.20 USDC to earned operating capital; that allocation is not an executed vendor payment.</p>
+          <p><strong>Accounting: PASS.</strong> The current ledger contains posted balanced journals for both invoice flows and the QuickNode expense. The 10% policy added 3.00 USDC from the newer 30 USDC receipt; earned operating capital now totals 5.20 USDC, including the earlier 2.20 USDC allocation. Allocation is not another transfer.</p>
           <p>Realized ROI uses reconciled customer revenue and confirmed x402 spend. It is undefined when confirmed spend is zero. Open invoices, quotes, and unconfirmed payments do not count.</p>
-          <p>V3 revenue never requires a prior spend. After approval and activation, its provenance bundle contains three facts (incoming revenue, invoice settlement, earned allocation) and two relationships, without adding to accounting totals. Reconciliation submits only the selected invoice bundle, never unrelated pending records. Five registry execution requests transfer zero value but still incur USDC gas and Circle overhead; live fees require an approved deployed target and estimates. Many spends can relate to one revenue, and one spend to many revenues.</p>
+          <p>V3 revenue never requires a prior spend. The current registry has five confirmed facts and two confirmed relationships, including the 30 USDC revenue, invoice settlement, earned allocation, and a later QuickNode <code>X402_SPEND</code>. Registry records do not add to accounting totals. Arc transaction fees are separate from the invoice and x402 payment amounts. Many spends can relate to one revenue, and one spend to many revenues.</p>
         </>,
       },
       {
         id: 'registry-provenance', title: 'EconomicRegistry V3 provenance', content: <>
           <p>Revenue can be recorded from authoritative settlement evidence without an originating Spend Intent or prior spend. V3 provenance does not execute, hold, or count another payment.</p>
           <p><code>SUPPORTS</code> is an optional attribution relationship between confirmed spend and revenue facts. It requires specific operator approval, retained x402 output and customer-work evidence bound to the exact spend, deal, invoice and customer. A shared goal, chronology or a bare hash is insufficient; a wallet commitment is not independently verified causality.</p>
-          <p>The contract is deployed and source verified. The installed Codex plugin is not activated for V3 and live V3 E2E remains unverified. The existing Codex business E2E stays PASS. See <a href="/docs/architecture#economic-registry">deployment details and acceptance status</a>.</p>
+          <p>The contract is deployed, source verified, and used for the confirmed records above. Five facts and two relationships are present, including the QuickNode <code>X402_SPEND</code>. The records provide provenance, not independently verified causality. See <a href="/docs/architecture#economic-registry">deployment details and acceptance status</a>.</p>
         </>,
       },
       {
@@ -257,7 +257,7 @@ First check the Circle CLI METRON can call, including its WSL-to-Windows adapter
       {
         id: 'local-state', title: 'Local state', content: <>
           <p>The SQLite database at <code>~/.metron/metron.sqlite</code> is authoritative across host sessions. Configuration and the generated dashboard also live under <code>~/.metron/</code>.</p>
-          <p><strong>Installed plugin and fresh-session recovery: PASS.</strong> After PR #20 squash-merged at <code>dccb9c4497534118841f3819366362725b15b7be</code>, marketplace/source and installed METRON v0.2.0 cache matched 47/47 tracked files, including the <code>DELIVERABLE</code> patch. A genuinely new Codex session loaded all four skills and read the existing ledger with integrity checks passing and zero state changes.</p>
+          <p><strong>Installed plugin and fresh-session recovery: PASS.</strong> The installed METRON v0.2.0 cache is at <code>a93781b1d799744cf758961bad1f7d7e6806e6ae</code>, the PR #27 baseline, and contains all four skills. The current SQLite ledger passes integrity checks and retains the latest invoice, payment, journal, and registry evidence.</p>
           <p>The HTML dashboard is a local read-only snapshot, not a control panel inside ChatGPT. METRON does not encrypt these files. Protect the directory and its backups with your operating-system account controls.</p>
         </>,
       },
@@ -270,15 +270,16 @@ First check the Circle CLI METRON can call, including its WSL-to-Windows adapter
           <a className="docs-inline-link" href={registryV3Explorer} target="_blank" rel="noreferrer">View on Arc Explorer <ArrowUpRight size={14} /></a>
           <ul>
             <li><strong>Deployed / source verified:</strong> YES. Receipt, exact pinned runtime and <code>VERSION = 3</code> readback passed.</li>
-            <li><strong>Installed Codex plugin V3 activated:</strong> NO — NOT ACTIVATED.</li>
-            <li><strong>Live V3 E2E verified:</strong> NO — NOT LIVE VERIFIED.</li>
+            <li><strong>Activated and live verified:</strong> YES for the documented controlled workflow using installed Codex METRON v0.2.0.</li>
+            <li><strong>V3 records confirmed in the current workflow:</strong> YES — five facts and two relationships.</li>
+            <li><strong>QuickNode X402_SPEND confirmed:</strong> YES — the original service fulfillment remains missing.</li>
             <li><strong>Existing Codex business E2E:</strong> PASS.</li>
           </ul>
-          <p>Deployment does not activate the plugin or establish live workflow acceptance. This public contract address is documentation only; displaying or copying it does not change <code>registry_v3_address</code> in live configuration. The V2 contract remains historical at <code>0x547552585d8d995c5063820b2950e0db52b4cab4</code>.</p>
+          <p>The five facts and two relationships are confirmed Arc Testnet records in the existing workflow. The contract does not execute Circle payments or establish independent business traction. The V2 contract remains historical at <code>0x547552585d8d995c5063820b2950e0db52b4cab4</code>.</p>
           <p>Circle remains payment authority and SQLite/journals remain financial truth. V3 revenue needs authoritative settlement evidence, never a spend. Optional many-to-many attribution does not alter totals. A wallet commitment proves who committed the hashes, not independent settlement or causal verification.</p>
           <p>The V2 pilot retains two confirmed SPEND records and <code>SKIPPED / NO_EXPLICIT_ATTRIBUTION</code> for revenue provenance. The historical 22 USDC receipt has not been imported into V3. Any approved import must retain original evidence and historical labeling without adding revenue or inventing spend attribution.</p>
           <p>Versioned schemas support future event types without changing the small V3 ABI. The registry cannot custody or transfer tokens, grant allowances, forward arbitrary transactions, or upgrade itself. On-chain records contain commitments, never customer emails, raw invoices, private documents, or secrets.</p>
-          <p>Optional <code>SUPPORTS</code> attribution requires specific operator approval, retained x402 output plus actual customer-work bytes bound to the exact spend/deal/invoice/customer; a bare hash is insufficient. Revenue is recorded independently and never requires this relationship. Append-only receipts bind their commitments, canonical facts, endpoints, registry references and readback. Raw work stays private, and auditable sources do not prove causality. Offline verification checks internal consistency; live chain readback and authoritative Circle evidence remain separate requirements.</p>
+          <p>Optional <code>SUPPORTS</code> attribution requires specific operator approval, retained x402 output plus actual customer-work bytes bound to the exact spend/deal/invoice/customer; a bare hash is insufficient. Revenue is recorded independently and never requires this relationship. No <code>SUPPORTS</code> causal claim connects the QuickNode expense to earlier customer revenue. Append-only receipts bind their commitments, canonical facts, endpoints, registry references and readback. Raw work stays private, and auditable sources do not prove causality.</p>
         </>,
       },
       {

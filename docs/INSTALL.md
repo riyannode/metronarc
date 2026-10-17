@@ -2,7 +2,7 @@
 
 METRON's business workflow starts in an interactive chat. The agent calls METRON's local finance CLI for you; users do not need to type Python commands for business operations.
 
-**Existing operators:** Codex installation and fresh-session recovery already PASS. METRON v0.2.0 is installed and enabled at post-merge source `dccb9c4497534118841f3819366362725b15b7be`; source and installed cache matched 47/47 tracked files, including `DELIVERABLE`, and a new Codex session loaded all four skills. Continue with the existing plugin, Circle session, wallet, and SQLite ledger. Do not reinstall, log in again, create wallets, reset SQLite, or repeat transactions merely to prove these results. See [recorded acceptance](SUBMISSION.md#current-acceptance-matrix).
+**Existing operators:** An earlier installation check matched the plugin cache to source `dccb9c4497534118841f3819366362725b15b7be` (47/47 tracked files) and loaded all four skills in a fresh Codex session; that commit is historical. The current installed and verified METRON v0.2.0 baseline is `a93781b1d799744cf758961bad1f7d7e6806e6ae`, with all four skills and merged PR #27. Continue with the existing plugin, Circle session, wallet, and SQLite ledger. Do not reinstall, log in again, create wallets, reset SQLite, or repeat transactions merely to prove these results. See [recorded acceptance](SUBMISSION.md#current-acceptance-matrix).
 
 The installation and Circle setup steps below are for new users or an explicitly authorized missing prerequisite.
 
@@ -16,7 +16,7 @@ METRON's Python runtime and SQLite state run locally. Circle CLI must be callabl
 
 ## Install METRON
 
-For new users, the Codex marketplace CLI provides this installation path. The repository is private; your GitHub account must already have access.
+For new users, the Codex marketplace CLI provides this installation path. The repository is public at [github.com/riyannode/metronarc](https://github.com/riyannode/metronarc). METRON v0.2.0 is installed and verified with all four skills at the `a93781b1d799744cf758961bad1f7d7e6806e6ae` baseline; PR #27 is merged at that baseline.
 
 ```sh
 codex plugin marketplace add riyannode/metronarc --ref master
@@ -54,7 +54,7 @@ Do not reinstall an existing CLI without a reason. Check `circle --version` and 
 
 ## EconomicRegistry V3 transition
 
-EconomicRegistry V3 records independent typed settlement facts and immutable optional relationships, including many-to-many attribution. Revenue never requires a spend. Circle remains payment authority and SQLite/journals remain financial truth; registry records never increase revenue or earned capital. V3 is DEPLOYED and source verified on Arc Testnet at `0xd26D5148deF3Eb37a0C28CE23674f58455918D7d`. The installed Codex plugin is NOT ACTIVATED for V3, and its V3 E2E is NOT LIVE VERIFIED; deployment does not enable it. The V2 contract at `0x547552585d8d995c5063820b2950e0db52b4cab4` on Arc Testnet (chain ID `5042002`) is historical provenance, with readback only in the V3 adapter. See [V3 design and transition](REGISTRY_V3.md). Configure and fund only the Circle operating wallet for payment operations. Service terms remain operator-owned through `service-set`. Existing operators do not reinstall, log in again, create wallets or reset SQLite for V3 development. New reconciled sources are captured durably while V3 is disabled; inspect deferred provenance in status/dashboard. Activation requires an approved deployed address and ABI/runtime verification through `registry-activate`, followed by explicit selected-source resume. `config-set` cannot bypass activation. See [activation procedure](REGISTRY_V3_HARDENING.md).
+EconomicRegistry V3 records independent typed settlement facts and immutable optional relationships, including many-to-many attribution. Revenue never requires a spend. Circle remains payment authority and SQLite/journals remain financial truth; registry records never increase revenue or earned capital. V3 is deployed and source verified on Arc Testnet at `0xd26D5148deF3Eb37a0C28CE23674f58455918D7d`, and is ACTIVE and live verified for the documented controlled workflow. Its current readback contains five confirmed facts and two confirmed relationships, including the newer invoice/capital provenance and the later QuickNode `X402_SPEND`. The V2 contract at `0x547552585d8d995c5063820b2950e0db52b4cab4` on Arc Testnet (chain ID `5042002`) is historical provenance, with readback only in the V3 adapter. See [V3 design and transition](REGISTRY_V3.md) and [activation procedure](REGISTRY_V3_HARDENING.md). Existing operators should keep their installed plugin, Circle session, wallet, and ledger; do not repeat setup or E2E transactions to prove these results.
 
 ## Set up Circle Agent Wallet with your AI agent
 
