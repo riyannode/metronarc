@@ -52,6 +52,18 @@ CREATE TABLE IF NOT EXISTS spend_intents (
   status TEXT NOT NULL CHECK (status IN ('PROPOSED','APPROVED','DENIED','ESCALATED','SUBMITTED','EXECUTED','FAILED','UNKNOWN')),
   reason_hash TEXT NOT NULL, created_at TEXT NOT NULL, executed_at TEXT, executed_payment_scheme TEXT
 );
+CREATE TABLE IF NOT EXISTS x402_response_staging (
+  spend_intent_id TEXT PRIMARY KEY REFERENCES spend_intents(id),
+  provider_ref TEXT NOT NULL UNIQUE,
+  request_body_hash TEXT NOT NULL CHECK (length(request_body_hash)=64),
+  request_context_json TEXT NOT NULL,
+  circle_response_blob BLOB NOT NULL CHECK (length(circle_response_blob) BETWEEN 1 AND 1048576),
+  circle_response_sha256 TEXT NOT NULL CHECK (length(circle_response_sha256)=64),
+  service_response_sha256 TEXT NOT NULL CHECK (length(service_response_sha256)=64),
+  status TEXT NOT NULL CHECK (status IN ('STAGED','PROMOTED','REJECTED')),
+  settlement_status TEXT NOT NULL CHECK (settlement_status IN ('UNCONFIRMED','RECEIVED','BATCHED','CONFIRMED','COMPLETED','FAILED','AMBIGUOUS')),
+  error_code TEXT, staged_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS deals (
   id TEXT PRIMARY KEY, counterparty_id TEXT NOT NULL REFERENCES counterparties(id), goal_id TEXT NOT NULL REFERENCES goals(id),
   amount_atomic INTEGER NOT NULL CHECK (amount_atomic > 0), currency TEXT NOT NULL, terms_json TEXT NOT NULL,

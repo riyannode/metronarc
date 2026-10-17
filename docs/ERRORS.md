@@ -90,6 +90,8 @@ The CLI returns stable codes in `{"ok":false,"error":{"code":...,"message":...}}
 | `METRON_REGISTRY_ALREADY_CLAIMED` | Another sync claimed the record. Use readback only and preserve the durable state. |
 | `METRON_REGISTRY_SEALED` | SQLite rejected mutation or deletion of immutable V3 provenance. Preserve the original record. |
 | `METRON_REGISTRY_EVIDENCE_INVALID` | Reconciled Circle evidence or its exact amount/address fields do not satisfy registry commitment requirements. |
+| `METRON_X402_RESPONSE_INVALID` | The staged Circle service response is missing, malformed, or does not match its request context; preserve the intent and do not claim fulfillment. |
+| `METRON_X402_RESPONSE_TOO_LARGE` | The Circle response exceeds the bounded staging limit; preserve the payment state and do not claim fulfillment. |
 | `METRON_REGISTRY_ORIGIN_SPEND_PENDING` | Historical V2 error only. V3 independent revenue never waits for a spend. |
 | `METRON_REGISTRY_PERSISTENCE_FAILED` | The local registry outbox could not persist the provenance record; business truth remains unchanged. |
 | `METRON_REGISTRY_RECORD_NOT_FOUND` | The requested registry outbox record does not exist; inspect local registry status and use its source entity ID. |

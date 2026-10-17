@@ -37,6 +37,7 @@ ARC_SYSTEM_USDC_EMITTER="0xfffffffffffffffffffffffffffffffffffffffe"
 ARC_ERC20_USDC_CONTRACT="0x3600000000000000000000000000000000000000"
 ARC_TRANSFER_TOPIC="0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 ARC_RPC_MAX_RESPONSE_BYTES=1048576
+SERVICE_RESPONSE_MAX_BYTES=1048576
 
 
 def executable() -> list[str]:
@@ -580,6 +581,42 @@ def service_payment_metadata(response: dict) -> dict:
     if amount is None or not isinstance(chain,str) or not isinstance(seller,str) or not isinstance(scheme,str): raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
     if not _is_evm_address(seller): raise CircleError("METRON_CIRCLE_SCHEMA_CHANGED")
     return {"amount_atomic":_usdc_amount_atomic(amount,payment),"chain":chain,"seller":seller,"scheme":scheme,"response":outer.get("response")}
+
+
+def service_response_context(body: dict | None,request_body_hash: str) -> dict:
+    if isinstance(body,dict) and body.get("jsonrpc")=="2.0":
+        request_id=body.get("id")
+        method=body.get("method")
+        if (isinstance(request_id,(str,int)) and not isinstance(request_id,bool) and isinstance(method,str) and method
+                and len(method)<=128):
+            return {"kind":"JSON_RPC","jsonrpc":"2.0","id":request_id,"method":method}
+    return {"kind":"OPAQUE","request_body_hash":request_body_hash}
+
+
+def validate_service_response(context: dict,response) -> tuple[bytes,str]:
+    if not isinstance(context,dict): raise CircleError("METRON_X402_RESPONSE_INVALID")
+    try:
+        blob=json.dumps(response,sort_keys=True,separators=(",",":"),ensure_ascii=True,allow_nan=False).encode("utf-8")
+    except (TypeError,ValueError,UnicodeEncodeError):
+        raise CircleError("METRON_X402_RESPONSE_INVALID") from None
+    if len(blob)>SERVICE_RESPONSE_MAX_BYTES: raise CircleError("METRON_X402_RESPONSE_TOO_LARGE")
+    if response is None: raise CircleError("METRON_X402_RESPONSE_INVALID")
+    if context.get("kind")=="JSON_RPC":
+        if (set(context)!={"kind","jsonrpc","id","method"} or context.get("jsonrpc")!="2.0"
+                or not isinstance(context.get("method"),str) or not isinstance(response,dict)
+                or response.get("jsonrpc")!="2.0" or response.get("id")!=context.get("id")
+                or "result" not in response or "error" in response):
+            raise CircleError("METRON_X402_RESPONSE_INVALID")
+        if context["method"]=="eth_getBlockByNumber":
+            result=response.get("result")
+            if (not isinstance(result,dict) or not isinstance(result.get("number"),str)
+                    or not isinstance(result.get("hash"),str)
+                    or re.fullmatch(r"0x[0-9a-fA-F]+",result["number"]) is None
+                    or re.fullmatch(r"0x[0-9a-fA-F]{64}",result["hash"]) is None):
+                raise CircleError("METRON_X402_RESPONSE_INVALID")
+    elif context.get("kind")!="OPAQUE" or not isinstance(context.get("request_body_hash"),str):
+        raise CircleError("METRON_X402_RESPONSE_INVALID")
+    return blob,hashlib.sha256(blob).hexdigest()
 
 
 def validate_service_payment_metadata(metadata: dict, maximum_atomic: int, seller: str, chain: str, scheme: str) -> None:
