@@ -43,7 +43,7 @@ function StepPreview({ step }: { step: number }) {
             <div className="flex justify-between py-1 text-[10px] text-[#5C5C5D]"><span>Credit · Accounts receivable</span><span>22.00</span></div>
           </div>
           <div className="mt-4 flex items-center justify-between gap-2 text-[10px]"><span className="text-[#5C5C5D]">Earned operating capital</span><span className="font-semibold text-[#1D5FA8]">2.20 USDC</span></div>
-          <p className="mt-3 text-[9px] leading-relaxed text-[#5C5C5D]">Capital is allocated. No x402 payment has been made since this revenue arrived.</p>
+          <p className="mt-3 text-[9px] leading-relaxed text-[#5C5C5D]">Capital is allocated by policy. Later x402 activity is a separate test with no proven causal link.</p>
         </div>
       )}
       <div className="flex items-center gap-1.5 border-t border-[#EBEBEA] bg-[#F8FAFE] px-5 py-2.5 text-[8px] text-[#5C5C5D]"><FileCheck2 size={11} className="text-[#2775CA]" /> Local rules & accounts <ArrowRight size={10} /> Circle handles payments</div>

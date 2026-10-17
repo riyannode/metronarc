@@ -69,7 +69,7 @@ test('FAQ expands accurate approval and testnet answers', async ({ page }) => {
   await expect(page.locator('#faq-answer-6')).toBeHidden()
   await expect(page.locator('#faq-answer-7')).toContainText('Arc Testnet')
   await page.locator('#how-it-works').getByRole('tab').nth(2).click()
-  await expect(page.locator('#workflow-preview')).toContainText('No x402 payment has been made since this revenue arrived')
+  await expect(page.locator('#workflow-preview')).toContainText('Later x402 activity is a separate test with no proven causal link')
 })
 
 test('marquee has a seamless duplicated track and loops automatically', async ({ page }) => {
@@ -319,7 +319,7 @@ test('dashboard invoice details, payment filters, and local policy inputs work',
   await expect(screen.locator('[data-payment-kind="x402"]')).toBeVisible()
   await expect(screen.locator('[data-payment-kind="x402"]')).toContainText('Historical x402 payments')
   await expect(screen.locator('[data-payment-kind="x402"]')).not.toContainText('2 historical')
-  await expect(screen).toContainText('no x402 payment followed the customer revenue')
+  await expect(screen).toContainText('A later QuickNode x402 test followed the 30 USDC flow')
   await screen.getByRole('button', { name: 'All', exact: true }).click()
   await expect(screen.getByRole('listitem')).toHaveCount(2)
   await navigation.getByRole('button', { name: 'Wallet', exact: true }).click()

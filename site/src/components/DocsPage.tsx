@@ -270,6 +270,7 @@ First check the Circle CLI METRON can call, including its WSL-to-Windows adapter
           <a className="docs-inline-link" href={registryV3Explorer} target="_blank" rel="noreferrer">View on Arc Explorer <ArrowUpRight size={14} /></a>
           <ul>
             <li><strong>Deployed / source verified:</strong> YES. Receipt, exact pinned runtime and <code>VERSION = 3</code> readback passed.</li>
+            <li><strong>Activated and live verified:</strong> YES for the documented controlled workflow using installed Codex METRON v0.2.0.</li>
             <li><strong>V3 records confirmed in the current workflow:</strong> YES — five facts and two relationships.</li>
             <li><strong>QuickNode X402_SPEND confirmed:</strong> YES — the original service fulfillment remains missing.</li>
             <li><strong>Existing Codex business E2E:</strong> PASS.</li>
